@@ -29,6 +29,8 @@ Orchestrator skill. Takes a raw requirement, breaks it into tickets, and drives 
    - **Production** — **always a hard gate** (see below), regardless of `mode`.
 9. **Monitor** — post-deploy observation for regressions.
 
+Stages 8–9 assume a deployed, running target (an app/service with environments to ship to and metrics to watch). For a repo with no such target — docs, config, a tool repo like this one — "deploy" collapses to committing/merging to the main branch, and "monitor" doesn't apply; skip it rather than forcing a fit. Detect this at intake, not partway through.
+
 Stages 3–5 and 7–9 have no dedicated specialist skill in this repo yet. Treat them as open slots in the pipeline, not stages to skip (except stage 3, which is intentionally skippable per-ticket as described above).
 
 ## Stage → agent mapping
@@ -106,4 +108,11 @@ Staging/UAT deploys can run in `auto` mode like any other stage — treat them a
 
 **Run 3 — real config edge case.** Config `{"mode": "auto", "stages": {"deploy": {"staging": "auto", "uat": "auto"}}}` (production deliberately omitted, everything else auto): production deploy still required confirmation, per the "only skip if `stages.deploy.production` is explicitly `\"auto\"`" rule — the omission-defaults-to-gated behavior held up as intended. No fix needed.
 
-Remaining open item: none of these were real `Agent` tool dispatches — still no live run with actual subagents doing the stage work. That's the next real validation, not another trace.
+**Run 4 — live run (2026-08-12), real `Agent` dispatches.** Task: add missing `README.md` for the `skills/personal/` and `skills/in-progress/` buckets in this repo. Ran for real: ticket breakdown (`ticket-card` Mode 1), technical design (`general-purpose` `Agent` call, read-only), coding (`general-purpose` `Agent` call, wrote the files), review (`code-review` skill, background).
+
+**Findings:**
+- Design and coding stages worked correctly on real dispatches. The coding-stage agent independently caught that the design stage's `sdlc-manager` description was stale relative to the actual frontmatter and re-verified against the real file rather than trusting the handoff — a good sign for the "don't fabricate, verify against the real thing" rule already in this file.
+- `code-review` caught a real issue (missing trailing newline on both new files, inconsistent with every other bucket README in the repo) — fixed directly rather than dispatching another agent, since it was a one-line fix.
+- **Deploy and Monitor don't map onto every target.** This repo has no staging/production/running service — "deploy" is just a commit to `main`, "monitor" doesn't apply. Folded a note into stage 8–9's description above: detect at intake whether the target is a deployed service or not, and collapse/skip those stages accordingly rather than forcing the template to fit.
+
+This closes out the "no live run yet" gap from Run 1–3. The stage-dispatch mechanics (real `Agent` calls, real skill calls, background review) all worked as designed.
