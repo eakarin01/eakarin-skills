@@ -1,13 +1,13 @@
 ---
 name: sdlc-manager
-description: Orchestrate a full software development pipeline from a raw requirement through tickets, design, coding, review, test, deploy, and monitoring — dispatching each stage to a specialist subagent. Reads a per-project config to run fully automated or pause for confirmation between stages, with deploy gated by default. DRAFT — specialist subagents for design/coding/test/deploy/monitor are not built yet; only ticket breakdown (via jira-card) and review (via code-review) currently have a real backing skill. Trigger on /sdlc-manager or when the user hands you a feature/requirement and asks to run or plan the whole dev pipeline for it.
+description: Orchestrate a full software development pipeline from a raw requirement through tickets, design, coding, review, test, deploy, and monitoring — dispatching each stage to a specialist subagent where one exists, and to a general-purpose agent otherwise. Reads a per-project config to run fully automated or pause for confirmation between stages; production deploy is always gated. DRAFT — only ticket breakdown (via ticket-card) and review (via code-review) currently have a real backing skill; the rest run on general-purpose by default. Trigger on /sdlc-manager or when the user hands you a feature/requirement and asks to run or plan the whole dev pipeline for it.
 ---
 
 # SDLC Manager
 
 Orchestrator skill. Takes a raw requirement, breaks it into tickets, and drives each ticket through the development pipeline by dispatching stages to specialist subagents via the `Agent` tool. Does not do the work of any stage itself — its job is sequencing, gating, and handing off.
 
-**Status: draft.** Stages other than ticketing and review don't have a dedicated specialist skill/agent yet — see the stage/agent mapping table below. Until those exist, fall back to `general-purpose` (or ask the user how they want that stage handled) and flag it as a gap rather than silently improvising.
+**Status: draft, not yet validated on a real run.** Stages other than ticketing and review don't have a dedicated specialist skill/agent yet — see the stage/agent mapping table below. `general-purpose` is the accepted default for those; no need to ask permission per run. The one stage that still needs explicit human confirmation regardless of agent is production deploy — that's a property of the action, not of which agent executes it.
 
 ## When to invoke
 
@@ -33,18 +33,18 @@ Stages 3–5 and 7–9 have no dedicated specialist skill in this repo yet. Trea
 
 ## Stage → agent mapping
 
-| Stage | Backing skill/agent today | Gap |
+| Stage | Backing skill/agent today | Default when none |
 |---|---|---|
-| Ticket breakdown | `ticket-card` skill (Mode 3) | none |
-| UX/UI design | none | needs a specialist agent; conditional per ticket |
-| Technical design | none | needs a specialist agent |
-| Coding | none | needs a specialist agent |
-| Review | `code-review` skill | none |
-| Test | none | needs a specialist agent |
-| Deploy | none | needs a specialist agent |
-| Monitor | none | needs a specialist agent |
+| Ticket breakdown | `ticket-card` skill (Mode 3) | — |
+| UX/UI design | none | `general-purpose` (conditional per ticket) |
+| Technical design | none | `general-purpose` |
+| Coding | none | `general-purpose` |
+| Review | `code-review` skill | — |
+| Test | none | `general-purpose` |
+| Deploy | none | `general-purpose`, staging/UAT only auto — production always gated |
+| Monitor | none | `general-purpose` |
 
-When dispatching a stage with no backing skill, say so explicitly to the user before improvising with a general-purpose agent.
+`general-purpose` is the default backing agent for any stage without a dedicated skill — dispatch to it without stopping to ask. Report which agent handled each stage as part of the normal per-stage status update (see Rules), so the user can see where a real specialist would add value later, without that visibility requiring a stop-and-ask.
 
 ## Config: auto vs. manual mode
 
@@ -71,6 +71,7 @@ Read `.claude/pipeline.json` at the project root before starting a run. Example:
 
 Chain stages without stopping in between. Still:
 - Dispatch each stage as its own `Agent` call — foreground when the next stage depends on this stage's output (e.g. design must finish before coding starts), background only for genuinely independent work (e.g. monitoring after deploy).
+- Cross-ticket dependencies (a sub-ticket's `depends-on:` from Mode 3 splitting) apply per stage, not just once: if ticket B depends on ticket A, B's coding stage needs A's actual implementation output (e.g. the real API contract), not just A's design doc. Don't start B's coding off of A's design alone — wait for A's coding stage to finish.
 - Surface each stage's result to the user as it completes; don't wait until the end of the whole pipeline to report anything.
 
 ### Manual mode
@@ -86,10 +87,23 @@ Staging/UAT deploys can run in `auto` mode like any other stage — treat them a
 - Never fabricate a stage's output (e.g. don't invent a design doc or test results) — dispatch to the real subagent/skill or ask the user to provide it.
 - If a requirement is ambiguous, resolve it at intake, not mid-pipeline.
 - Report per-stage status as you go: what stage ran, which skill/agent handled it, and the outcome.
-- If the pipeline stalls on a missing specialist agent, tell the user which stage is blocked and ask how they want to proceed (build the specialist agent now, handle manually, or use general-purpose as a stand-in for this run only).
+- Missing a specialist agent is not a blocker — dispatch to `general-purpose` and move on. Only stop and ask if `general-purpose` genuinely can't do the stage (e.g. it needs credentials/access the user hasn't granted).
 
 ## Open TODOs before this skill graduates out of `in-progress/`
 
-- [ ] Build specialist agents/skills for UX/UI design, technical design, coding, test, deploy, monitor stages
+- [ ] Build specialist agents/skills for UX/UI design, technical design, coding, test, deploy, monitor stages — as-needed, once general-purpose proves insufficient for a given stage on real work, not speculatively
 - [ ] Decide the concrete shape of `.claude/pipeline.json` once used on a real project (per-ticket overrides? per-branch?)
-- [ ] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended
+- [x] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended — see dry run notes below (2026-08-11)
+- [x] Validate manual-mode stop-and-confirm behavior and real `.claude/pipeline.json` config parsing — see dry run notes below (2026-08-11)
+
+## Dry run notes (2026-08-11)
+
+**Run 1 — auto mode, happy path.** Traced a fabricated 2-ticket requirement ("avatar upload") through the full 9 stages: ticketing (real `ticket-card` Mode 3 call), UX/UI (conditional skip on the backend ticket, ran on the UI ticket), technical design, coding, review (real `code-review` reference), test, staged deploy, production-deploy gate, monitor.
+
+**Finding, already folded into this file:** cross-ticket `depends-on:` isn't a one-time design-stage check — it recurs at the coding stage too (a downstream ticket's coding needs the upstream ticket's actual implementation output, not just its design). See the note under Auto mode.
+
+**Run 2 — manual mode.** Traced ticket #1 with `{"mode": "manual"}`: every stage transition (design → coding → review → test → deploy staging → deploy production → monitor) stopped for confirmation before advancing. No branch found where two stages could chain silently — manual mode needs no separate dispatch logic, just a different stopping condition than auto. No fix needed.
+
+**Run 3 — real config edge case.** Config `{"mode": "auto", "stages": {"deploy": {"staging": "auto", "uat": "auto"}}}` (production deliberately omitted, everything else auto): production deploy still required confirmation, per the "only skip if `stages.deploy.production` is explicitly `\"auto\"`" rule — the omission-defaults-to-gated behavior held up as intended. No fix needed.
+
+Remaining open item: none of these were real `Agent` tool dispatches — still no live run with actual subagents doing the stage work. That's the next real validation, not another trace.
