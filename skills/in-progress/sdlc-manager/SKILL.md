@@ -22,11 +22,13 @@ Orchestrator skill. Takes a raw requirement, breaks it into tickets, and drives 
 3. **UX/UI design** — wireframes/mockups/flow. **Conditional**: only runs for tickets flagged as UI-touching in stage 2; skip straight to stage 4 for backend-only or infra-only tickets. Its output (screens, flows, states) feeds stage 4 as a constraint on the technical approach.
 4. **Technical design** — architecture/approach for each ticket, informed by the UX/UI output when stage 3 ran.
 5. **Coding** — implementation.
-6. **Review** — use the `code-review` skill against the resulting diff.
-7. **Test** — verification (unit/integration, or manual test plan if no test agent exists yet).
+6. **Review** — use the `code-review` skill against the resulting diff. If findings need fixing, dispatch a separate, scoped `Agent` call listing only those findings (don't reuse the original coding-stage agent's context) — then the orchestrator commits once, after the user confirms, rather than the sub-agent committing. This keeps the diff the user reviews and the diff that gets committed identical.
+7. **Test** — verification (unit/integration, or manual test plan if no test agent exists yet). If this is the first ticket in the project needing a given kind of test (e.g. no test framework installed yet), expect this stage to cost noticeably more than design/coding — it's paying for one-time infra setup (test runner, emulator wiring, config), not just writing test cases. Say so when reporting the stage's result, so the cost isn't a surprise. Later tickets that reuse the same infra won't carry that cost.
 8. **Deploy** — ships the change, per environment:
    - **Staging/UAT** — low-risk, reversible. Can run in `auto` mode like any other stage.
    - **Production** — **always a hard gate** (see below), regardless of `mode`.
+   - Before deploying, check for environment/dependency staleness proactively rather than waiting for the deploy command to surface it as a warning after the fact — e.g. a runtime version nearing deprecation, an outdated core framework dependency. A pipeline run can span real time between intake and deploy; assumptions baked in at scaffold time can go stale by the time deploy actually happens.
+   - Treat actionable warnings in the deploy command's own output (not just its pass/fail exit code) as part of the stage's job to resolve or explicitly report — e.g. a missing cleanup policy, a soon-to-be-decommissioned runtime. Don't just check "did it exit 0."
 9. **Monitor** — post-deploy observation for regressions.
 
 Stages 8–9 assume a deployed, running target (an app/service with environments to ship to and metrics to watch). For a repo with no such target — docs, config, a tool repo like this one — "deploy" collapses to committing/merging to the main branch, and "monitor" doesn't apply; skip it rather than forcing a fit. Detect this at intake, not partway through.
@@ -110,6 +112,10 @@ Config shape (`.claude/pipeline.json`):
       "inProgress": "In Progress",
       "review": "Review",
       "done": "Done"
+    },
+    "labels": {
+      "epic": "<tool-specific label identifier>",
+      "subTask": "<tool-specific label identifier>"
     }
   }
 }
@@ -117,6 +123,7 @@ Config shape (`.claude/pipeline.json`):
 
 - `tool` names which integration to use (only whatever MCP tools/skills are actually available in the session — don't assume one is connected without checking).
 - `lists` maps the pipeline's generic stage names to this board's actual list names, since boards vary. Read from this map rather than hardcoding a list name.
+- `labels` is optional. If present, attach `labels.epic` to the epic/tracker item and `labels.subTask` to each sub-ticket item when creating them, so epic vs. sub-ticket is visually distinguishable on the board (in addition to the naming convention below). If the board tool can't create/rename labels via the tools available in-session, don't try to work around that mid-pipeline — set up the label mapping once during the first-run bootstrap (find or create suitable labels, get the user to name them if the tool can't do it programmatically) and record the resulting identifiers in this config, same as `lists`. If `labels` is absent, skip label attachment entirely — it's a visual nice-to-have, not required for the pipeline to function.
 
 **Entry points (generic, board-agnostic):**
 - **A — requirement given as a prompt:** refine it in-chat, then, if `taskBoard` is configured, create it as a card/issue in the `ready` list (skip `refine` if already fully scoped — no open questions left unresolved).
@@ -125,6 +132,7 @@ Config shape (`.claude/pipeline.json`):
 **Sub-ticket mapping (stage 2 — ticket breakdown), when a board is configured:** `ticket-card` Mode 3 output maps to **one card/issue per sub-ticket**, not a checklist on the parent — each sub-ticket needs to move independently through the stage lists (e.g. a UI sub-ticket can be in `review` while a backend sub-ticket is still `inProgress`), and `depends-on:` relationships need to be visible as links between real items, not buried in one item's checklist.
 - The original requirement item becomes the **epic/tracker**: its description links to each sub-ticket item, and it moves to `inProgress` once the first sub-ticket starts, to `done` once every sub-ticket reaches `done`. It does not itself move through `review`.
 - Each sub-ticket item starts in `ready` (already scoped by the split) and moves through `ready → inProgress → review → done` independently as its own stages 3–9 run.
+- **Naming convention:** give each sub-ticket a title prefixed with the parent requirement's number and its own index, e.g. `[003.2] <sub-ticket title>` for the 2nd sub-ticket of requirement 003. The epic/tracker keeps its plain title, no prefix — this alone (before any label config) makes epic vs. sub-ticket distinguishable at a glance.
 - Encode `depends-on:` in the dependent item's description (e.g. a link to the blocking item) so it's visible without relying on checklist-item state.
 
 **Card/issue movement is a side effect of stage transitions, not a separate step:** when a sub-ticket's stage advances, move it to the matching list in the same turn — don't batch board updates for later.
@@ -143,6 +151,7 @@ Config shape (`.claude/pipeline.json`):
 - [x] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended — see dry run notes below (2026-08-11)
 - [x] Validate manual-mode stop-and-confirm behavior and real `.claude/pipeline.json` config parsing — see dry run notes below (2026-08-11)
 - [x] Design task board integration once a real trial actually needed one — see "Task board integration" section above (2026-08-12, `dormitory-management-system` trial)
+- [x] Run a full 9-stage pipeline end to end on a real ticket, not just a dry run — see Run 5 below (2026-08-12, `dormitory-management-system` trial)
 
 ## Dry run notes (2026-08-11)
 
@@ -162,3 +171,15 @@ Config shape (`.claude/pipeline.json`):
 - **Deploy and Monitor don't map onto every target.** This repo has no staging/production/running service — "deploy" is just a commit to `main`, "monitor" doesn't apply. Folded a note into stage 8–9's description above: detect at intake whether the target is a deployed service or not, and collapse/skip those stages accordingly rather than forcing the template to fit.
 
 This closes out the "no live run yet" gap from Run 1–3. The stage-dispatch mechanics (real `Agent` calls, real skill calls, background review) all worked as designed.
+
+## Live run notes (2026-08-12) — first full 9-stage pipeline
+
+**Run 5 — `dormitory-management-system` trial, ticket 001.1 (Room data model & CRUD API), manual mode, Trello task board configured.** First time every stage ran for real against an actual product codebase with a real deploy target, not this skills repo. Full chain: intake → `ticket-card` Mode 3 split into 4 sub-tickets (with the epic/sub-ticket Trello structure this file now documents) → technical design (`general-purpose`, read-only) → coding (`general-purpose`, wrote real Cloud Functions) → `code-review` (background, found 4 real fixable issues + 3 correctly-expected-and-ignored auth gaps) → fix dispatch (separate scoped `Agent` call) → orchestrator commit → test (`general-purpose`, had to bootstrap jest/ts-jest/Firestore-emulator wiring from scratch since none existed — 12/12 passing) → deploy (staging/production collapsed to the same single real Firebase project, since the trial has no separate staging project; hit a real Blaze-plan billing gate, stopped and asked rather than working around it) → monitor (skipped — no live traffic yet for a backend-only ticket with no frontend caller).
+
+**Findings, already folded into this file:**
+- Review-fix-commit as a named pattern (stage 6 description): fix dispatches should be a separate `Agent` call scoped to just the findings, and the orchestrator — not the sub-agent — commits once after user confirmation, so the reviewed diff and the committed diff are provably the same thing.
+- Test-stage cost asymmetry when bootstrapping infra (stage 7 description): the first ticket needing a test framework pays a one-time setup cost far above normal per-stage cost (this run: ~78k tokens / 72 tool calls / ~10.5 min for test stage vs. ~27k tokens / 1 call for design, ~31k tokens / 12 calls for coding) — say so up front so it's not read as the stage misbehaving.
+- Deploy-time environment staleness (stage 8 description): `functions/package.json`'s `engines.node: "20"` was set at project scaffold time, weeks before this pipeline run; by deploy time Node 20 had already been deprecated for 3+ months. Only surfaced via the deploy command's own warning output, not proactively. Added guidance to check for this kind of drift before deploying, and to treat actionable deploy-output warnings (e.g. a missing Artifact Registry cleanup policy) as part of the stage's job, not an aside.
+- Real, hard-to-reverse blocker handled correctly without being told how: Cloud Functions deploy requires the Blaze billing plan; the project was still on the free Spark plan. Stopped, explained exactly what was needed and linked the upgrade page, did not attempt any workaround (e.g. silently switching to a different deploy target) — this is the "ask when a stage genuinely can't proceed" rule from Rules working as intended on a real billing/access gate, not just a hypothetical.
+- Task-board label-marker idea validated end-to-end, including its real limitation: the connected Trello MCP tools can attach/detach existing labels but cannot create or rename them — worked around by using the board's existing unnamed default-color labels and asking the user to name them once via the Trello UI. Folded into the `labels` config guidance above: set this up once during first-run bootstrap, record the resulting identifiers, don't improvise mid-pipeline if the tool can't do it programmatically.
+- Single-environment reality: many small/trial projects won't have separate staging and production Firebase/cloud projects. When that's the case, "staging/UAT" and "production" in stage 8 point at the same real infrastructure — the production hard-gate rule still applies (this run asked before deploying, since `pipeline.json` had `production: "manual"`), but call this out explicitly if a project's config implies environments that don't actually exist as separate infra, rather than assuming a staging sandbox is always available.
