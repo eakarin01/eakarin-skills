@@ -18,7 +18,7 @@ Orchestrator skill. Takes a raw requirement, breaks it into tickets, and drives 
 ## Pipeline stages
 
 1. **Requirement intake** — clarify scope with the user if the ask is underspecified. Do not proceed to ticketing on a vague requirement; ask.
-2. **Ticket breakdown** — split the requirement into tickets. Use the `jira-card` skill to draft each ticket's description. For each ticket, decide whether it needs UX/UI work (anything touching a user-facing screen/flow) and mark it — this decides whether stage 3 runs for that ticket.
+2. **Ticket breakdown** — split the requirement into tickets. Use the `ticket-card` skill's Mode 3 (split) to produce the sub-tickets, each following its Mode 1 template. For each ticket, decide whether it needs UX/UI work (anything touching a user-facing screen/flow) and mark it — this decides whether stage 3 runs for that ticket.
 3. **UX/UI design** — wireframes/mockups/flow. **Conditional**: only runs for tickets flagged as UI-touching in stage 2; skip straight to stage 4 for backend-only or infra-only tickets. Its output (screens, flows, states) feeds stage 4 as a constraint on the technical approach.
 4. **Technical design** — architecture/approach for each ticket, informed by the UX/UI output when stage 3 ran.
 5. **Coding** — implementation.
@@ -35,7 +35,7 @@ Stages 3–5 and 7–9 have no dedicated specialist skill in this repo yet. Trea
 
 | Stage | Backing skill/agent today | Gap |
 |---|---|---|
-| Ticket breakdown | `jira-card` skill | none |
+| Ticket breakdown | `ticket-card` skill (Mode 3) | none |
 | UX/UI design | none | needs a specialist agent; conditional per ticket |
 | Technical design | none | needs a specialist agent |
 | Coding | none | needs a specialist agent |

@@ -1,3 +1,3 @@
 # Productivity skills
 
-- **[jira-card](./jira-card/SKILL.md)** — Write or summarize a Jira card description for engineering tickets.
+- **[ticket-card](./ticket-card/SKILL.md)** — Write, summarize, or split a ticket/issue description for any tracker (Jira, Linear, GitHub Issues, etc.).

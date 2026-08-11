@@ -55,7 +55,7 @@ Full syntax and other source types (local dir, remote `marketplace.json`, non-Gi
 
 ### Productivity
 
-- **[jira-card](./skills/productivity/jira-card/SKILL.md)** — Write or summarize a Jira card description for engineering tickets.
+- **[ticket-card](./skills/productivity/ticket-card/SKILL.md)** — Write, summarize, or split a ticket/issue description for any tracker (Jira, Linear, GitHub Issues, etc.).
 
 ### Misc
 
