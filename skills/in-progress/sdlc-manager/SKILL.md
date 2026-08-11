@@ -67,7 +67,16 @@ Read `.claude/pipeline.json` at the project root before starting a run. Example:
 
 - `mode` is the project-wide default: `"auto"` or `"manual"`.
 - `stages` optionally overrides specific stages regardless of the project-wide mode. `deploy` is keyed by environment since staging/UAT and production carry different risk.
-- If the file doesn't exist, default to `"manual"` everywhere — don't assume a project wants unattended execution, including to staging. Ask the user once whether to create the config, and with what defaults.
+- If the file doesn't exist, default to `"manual"` everywhere — don't assume a project wants unattended execution, including to staging.
+
+### First-run bootstrap
+
+If `.claude/pipeline.json` doesn't exist when `sdlc-manager` is invoked on a project, treat this as a one-time setup conversation before running any stage — ask once, covering both of the following together, not in separate follow-up passes:
+
+1. **Mode:** project-wide `auto` or `manual`, and whether `deploy` needs per-environment overrides.
+2. **Task board (optional):** whether this project tracks work on an external board. If the user names one, check which matching MCP tools/skills are actually connected in the current session (don't assume — verify) before configuring `taskBoard`. If none is connected yet, say so and offer to proceed without board integration rather than configuring a tool that isn't reachable. If the user has no board, omit `taskBoard` entirely — it's optional, not a default.
+
+Write the resulting `.claude/pipeline.json` (see shape above and in "Task board integration" below), confirm it back to the user in one message, then proceed to stage 1. Re-running this bootstrap on a project that already has the file is unnecessary — just read it.
 
 ### Auto mode
 
@@ -84,6 +93,42 @@ Run one stage, report the result, then stop and ask for confirmation before adva
 
 Staging/UAT deploys can run in `auto` mode like any other stage — treat them as reversible, low-risk. **Production deploy stays a hard confirmation point regardless of `mode`**, since it's hard-to-reverse and affects shared/real-user systems. Only skip the confirmation if `stages.deploy.production` is explicitly set to `"auto"` in the config **and** the user has previously confirmed they want that for this project. When in doubt, ask.
 
+## Task board integration (optional, per-project)
+
+A project may track work on an external task board (Trello, Jira, Linear, GitHub Projects, ...) instead of purely in-chat. This is **opt-in per project** via `.claude/pipeline.json` — the skill stays board-agnostic; nothing here names a specific tool. If a project has no `taskBoard` config, run purely conversationally as described in the stages above — don't go looking for a board.
+
+Config shape (`.claude/pipeline.json`):
+
+```json
+{
+  "taskBoard": {
+    "tool": "trello",
+    "boardUrl": "https://trello.com/b/XXXXXXXX/board-name",
+    "lists": {
+      "refine": "To Refine",
+      "ready": "Ready",
+      "inProgress": "In Progress",
+      "review": "Review",
+      "done": "Done"
+    }
+  }
+}
+```
+
+- `tool` names which integration to use (only whatever MCP tools/skills are actually available in the session — don't assume one is connected without checking).
+- `lists` maps the pipeline's generic stage names to this board's actual list names, since boards vary. Read from this map rather than hardcoding a list name.
+
+**Entry points (generic, board-agnostic):**
+- **A — requirement given as a prompt:** refine it in-chat, then, if `taskBoard` is configured, create it as a card/issue in the `ready` list (skip `refine` if already fully scoped — no open questions left unresolved).
+- **B — requirement already exists on the board:** scan the `refine` and `ready` lists for items to pick up. An item in `refine` still needs intake/scoping before ticket breakdown; an item in `ready` can go straight to stage 2.
+
+**Sub-ticket mapping (stage 2 — ticket breakdown), when a board is configured:** `ticket-card` Mode 3 output maps to **one card/issue per sub-ticket**, not a checklist on the parent — each sub-ticket needs to move independently through the stage lists (e.g. a UI sub-ticket can be in `review` while a backend sub-ticket is still `inProgress`), and `depends-on:` relationships need to be visible as links between real items, not buried in one item's checklist.
+- The original requirement item becomes the **epic/tracker**: its description links to each sub-ticket item, and it moves to `inProgress` once the first sub-ticket starts, to `done` once every sub-ticket reaches `done`. It does not itself move through `review`.
+- Each sub-ticket item starts in `ready` (already scoped by the split) and moves through `ready → inProgress → review → done` independently as its own stages 3–9 run.
+- Encode `depends-on:` in the dependent item's description (e.g. a link to the blocking item) so it's visible without relying on checklist-item state.
+
+**Card/issue movement is a side effect of stage transitions, not a separate step:** when a sub-ticket's stage advances, move it to the matching list in the same turn — don't batch board updates for later.
+
 ## Rules
 
 - Never fabricate a stage's output (e.g. don't invent a design doc or test results) — dispatch to the real subagent/skill or ask the user to provide it.
@@ -97,6 +142,7 @@ Staging/UAT deploys can run in `auto` mode like any other stage — treat them a
 - [ ] Decide the concrete shape of `.claude/pipeline.json` once used on a real project (per-ticket overrides? per-branch?)
 - [x] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended — see dry run notes below (2026-08-11)
 - [x] Validate manual-mode stop-and-confirm behavior and real `.claude/pipeline.json` config parsing — see dry run notes below (2026-08-11)
+- [x] Design task board integration once a real trial actually needed one — see "Task board integration" section above (2026-08-12, `dormitory-management-system` trial)
 
 ## Dry run notes (2026-08-11)
 
