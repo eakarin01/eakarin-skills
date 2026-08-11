@@ -29,6 +29,22 @@ List every `SKILL.md` in the repo:
 ./scripts/list-skills.sh
 ```
 
+## Install from other marketplaces
+
+Third-party skills/plugins can be added the same way as any Claude Code marketplace, via the `/plugin` slash command:
+
+```bash
+# 1. Add the marketplace
+/plugin marketplace add multica-ai/andrej-karpathy-skills
+
+# 2. Install its plugin (bundles all skills in the repo)
+/plugin install andrej-karpathy-skills@karpathy-skills
+```
+
+`mattpocock/skills` publishes its whole repo as a single plugin too (`mattpocock-skills@mattpocock`) — but since we only wanted the `handoff` skill from it, that one was vendored directly into `skills/personal/handoff/` instead of installed via the marketplace (see the source comment in that file for attribution/update tracking).
+
+Full syntax and other source types (local dir, remote `marketplace.json`, non-GitHub git hosts) are in Claude Code's official plugin marketplace documentation.
+
 ## Reference
 
 ### Engineering
