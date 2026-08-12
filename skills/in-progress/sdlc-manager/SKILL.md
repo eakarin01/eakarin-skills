@@ -137,6 +137,16 @@ Config shape (`.claude/pipeline.json`):
 
 **Card/issue movement is a side effect of stage transitions, not a separate step:** when a sub-ticket's stage advances, move it to the matching list in the same turn — don't batch board updates for later.
 
+## Resuming a pipeline
+
+When the user asks to resume or check status of a pipeline already in progress (see "When to invoke"), and a task board is configured, don't start a fresh breakdown — reconstruct where things actually are:
+
+1. **Read the epic/tracker card.** Its description already links every sub-ticket that's been split off so far (see "Sub-ticket mapping" above). If some obviously-needed sub-tickets aren't listed yet, the ticket-breakdown stage is incomplete — offer to continue it before touching execution stages.
+2. **For each linked sub-ticket, read its current list.** The list gives a coarse stage bucket (e.g. `inProgress` covers stages 3–5, `review` covers 6–7, `done` covers 8–9) — not the exact stage, since one list spans multiple pipeline stages.
+3. **Pin down the exact stage from real evidence, not the list alone.** Check the actual repo: commits/PRs referencing the sub-ticket (e.g. `git log --grep=<ticket-id-or-Trello-URL>`), whether design/coding artifacts exist, whether tests exist and pass, whether it's been deployed. The list position is a hint for where to start looking, not the source of truth — this follows the same "never fabricate, verify against the real thing" rule as any other stage. If the list and the real evidence disagree (e.g. card says `review` but no commit exists yet), trust the evidence and correct the card's list to match.
+4. **Resume from the next stage after the last one with real, verified output**, respecting `depends-on:` — don't resume a sub-ticket whose blocking dependency isn't actually finished, even if its card looks further along.
+5. Report what was found per sub-ticket (list vs. actual state, any corrections made) before resuming work, so the user can catch a wrong reconstruction before more stages run on top of it.
+
 ## Rules
 
 - Never fabricate a stage's output (e.g. don't invent a design doc or test results) — dispatch to the real subagent/skill or ask the user to provide it.
