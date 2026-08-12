@@ -20,6 +20,8 @@ Orchestrator skill. Takes a raw requirement, breaks it into tickets, and drives 
 1. **Requirement intake** — clarify scope with the user if the ask is underspecified. Do not proceed to ticketing on a vague requirement; ask.
 2. **Ticket breakdown** — split the requirement into tickets. Use the `ticket-card` skill's Mode 3 (split) to produce the sub-tickets, each following its Mode 1 template. For each ticket, decide whether it needs UX/UI work (anything touching a user-facing screen/flow) and mark it — this decides whether stage 3 runs for that ticket.
 3. **UX/UI design** — wireframes/mockups/flow. **Conditional**: only runs for tickets flagged as UI-touching in stage 2; skip straight to stage 4 for backend-only or infra-only tickets. Its output (screens, flows, states) feeds stage 4 as a constraint on the technical approach.
+   - Must produce a real rendered artifact, not narrated text. Use the `Artifact` tool (with the `artifact-design` skill) to build an actual HTML wireframe/mockup for every new-or-changed screen and state (loading/error/empty, not just the happy path) — this is the same "don't fabricate a stage's output" principle already in Rules, applied to design instead of code/tests.
+   - If `.claude/pipeline.json` has `designSystem` configured (see "Design-system integration" below), check it via `DesignSync` *before* designing anything new — reuse an existing component/pattern rather than inventing a fresh one, and only design something new for a genuine gap. After the ticket's coding stage lands, push new or changed components back into the project so it stays current for the next ticket. If no `designSystem` is configured, fall back to reading the actual shipped source (and a live screenshot via `claude-in-chrome` if it's already deployed) for whatever screens already exist, so the new screen stays visually/structurally consistent instead of guessing fresh each time.
 4. **Technical design** — architecture/approach for each ticket, informed by the UX/UI output when stage 3 ran.
 5. **Coding** — implementation.
 6. **Review** — use the `code-review` skill against the resulting diff. If findings need fixing, dispatch a separate, scoped `Agent` call listing only those findings (don't reuse the original coding-stage agent's context) — then the orchestrator commits once, after the user confirms, rather than the sub-agent committing. This keeps the diff the user reviews and the diff that gets committed identical.
@@ -137,6 +139,24 @@ Config shape (`.claude/pipeline.json`):
 - Encode `depends-on:` in the dependent item's description (e.g. a link to the blocking item) so it's visible without relying on checklist-item state.
 
 **Card/issue movement is a side effect of stage transitions, not a separate step:** when a sub-ticket's stage advances, move it to the matching list in the same turn — don't batch board updates for later.
+
+## Design-system integration (optional, per-project)
+
+A project may keep a hosted design-system project (via the `DesignSync` tool, backing claude.ai/design) as the source of truth for its UI components and foundations (colors, typography, buttons, forms, ...), instead of stage 3 re-deriving conventions from scratch on every UI ticket. This is **opt-in per project** via `.claude/pipeline.json`, same pattern as `taskBoard`. If a project has no `designSystem` config, stage 3 falls back to reading shipped source/screenshots directly (see stage 3's description above) — don't create a design-system project unprompted mid-pipeline.
+
+Config shape (`.claude/pipeline.json`):
+
+```json
+{
+  "designSystem": {
+    "projectId": "<DesignSync project id>"
+  }
+}
+```
+
+- **Bootstrapping** (one-time, not a per-ticket cost): when a project first opts in, extract the UI already shipped (components, states, foundational tokens) into preview HTML files and push them via `DesignSync` (`create_project` → `finalize_plan` → `write_files`). Each preview's first line should be an `<!-- @dsCard group="..." -->` marker so it shows up in the Design System pane without needing `register_assets`. Group by rough category (e.g. `Foundations`, `Components`) — match the project's own natural categories rather than forcing a fixed taxonomy.
+- **Every stage-3 run** (per UI-touching ticket): read the project via `list_files`/`get_file` first to see what already exists, design new screens by composing/extending those patterns, then after the ticket's coding stage lands, push whatever's new or changed back (new component, new state, a foundational token that changed) so the project stays current. Treat "check before designing, update after shipping" as the steady-state loop — bootstrapping only happens once.
+- **Note real inconsistencies found while bootstrapping or updating** (e.g. a color hardcoded in one place but tokenized elsewhere, two components solving the same problem slightly differently) as commentary in the preview file itself, not just in chat — so the next stage-3 run sees it without having to rediscover it.
 
 ## Resuming a pipeline
 
