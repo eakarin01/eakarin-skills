@@ -29,7 +29,7 @@ Orchestrator skill. Takes a raw requirement, breaks it into tickets, and drives 
 4. **Technical design** — architecture/approach for each ticket, informed by the UX/UI output when stage 3 ran.
 5. **Coding** — implementation.
 6. **Review** — use the `code-review` skill against the resulting diff. If findings need fixing, dispatch a separate, scoped `Agent` call listing only those findings (don't reuse the original coding-stage agent's context) — then the orchestrator commits once, after the user confirms, rather than the sub-agent committing. This keeps the diff the user reviews and the diff that gets committed identical.
-7. **Test** — verification (unit/integration, or manual test plan if no test agent exists yet). For any ticket with a UI, a live browser check (e.g. `claude-in-chrome` against the dev server) is part of this stage, not optional: pure, well-tested logic can still be wired wrong at runtime. In the `virtual-agent-office` trial, 77 passing unit tests covered the walker simulation, but the live check found characters never re-routing on status change — the tests had locked in the wrong behaviour. Before judging any animation or timing seen through `claude-in-chrome`, check `document.visibilityState`: a tab the extension drives can be hidden, which pauses requestAnimationFrame and makes a healthy scene look frozen (this produced a false "deadlock" report in the same trial). If this is the first ticket in the project needing a given kind of test (e.g. no test framework installed yet), expect this stage to cost noticeably more than design/coding — it's paying for one-time infra setup (test runner, emulator wiring, config), not just writing test cases. Say so when reporting the stage's result, so the cost isn't a surprise. Later tickets that reuse the same infra won't carry that cost.
+7. **Test** — verification (unit/integration, or manual test plan if no test agent exists yet). For any ticket with a UI, a live browser check (e.g. `claude-in-chrome` against the dev server) is part of this stage, not optional: pure, well-tested logic can still be wired wrong at runtime. In the `virtual-agent-office` trial, 77 passing unit tests covered the walker simulation, but the live check found characters never re-routing on status change — the tests had locked in the wrong behaviour. Before judging any animation or timing seen through `claude-in-chrome`, check `document.visibilityState`: a tab the extension drives can be hidden, which pauses requestAnimationFrame and makes a healthy scene look frozen (this produced a false "deadlock" report in the same trial). The same hidden tab can also drop real mouse clicks while scripts still run; if a click has no effect, trigger the control with `element.click()` through the page-script tool and say in the report that the click path itself went untested. If this is the first ticket in the project needing a given kind of test (e.g. no test framework installed yet), expect this stage to cost noticeably more than design/coding — it's paying for one-time infra setup (test runner, emulator wiring, config), not just writing test cases. Say so when reporting the stage's result, so the cost isn't a surprise. Later tickets that reuse the same infra won't carry that cost.
 8. **Deploy** — ships the change, per environment:
    - **Staging/UAT** — low-risk, reversible. Can run in `auto` mode like any other stage.
    - **Production** — **always a hard gate** (see below), regardless of `mode`.
@@ -78,6 +78,28 @@ Read `.claude/pipeline.json` at the project root before starting a run. Example:
 - `stages` optionally overrides specific stages regardless of the project-wide mode. `deploy` is keyed by environment since staging/UAT and production carry different risk.
 - If the file doesn't exist, default to `"manual"` everywhere — don't assume a project wants unattended execution, including to staging.
 
+### Schema
+
+Every key the skill reads. Only `mode` is required; each optional block is explained in its own section below.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `mode` | `"auto"` \| `"manual"` | `"manual"` | Project-wide stage gating |
+| `stages.<stage>` | `"auto"` \| `"manual"` | `mode` | Per-stage override; stage keys are `intake`, `tickets`, `uxui`, `design`, `coding`, `review`, `test`, `deploy`, `monitor` |
+| `stages.deploy.<env>` | `"auto"` \| `"manual"` | `"manual"` for `production`, else `mode` | Per-environment deploy gating; `production` is gated unless explicitly `"auto"` *and* confirmed |
+| `deployTarget.tool` | string | — | What "deploy" means here (`"firebase"`, `"vercel"`, `"local"`, …). `"local"` collapses stage 8 to merging to main and skips stage 9 |
+| `deployTarget.note` | string | — | Free-text context for the deploy agent (e.g. why a ticket is on hold) |
+| `taskBoard.tool` | string | — | Board integration to use; must match a connected MCP/skill |
+| `taskBoard.boardUrl` | URL | — | Human link to the board |
+| `taskBoard.workspaceId` / `spaceId` / `listId` | string | — | Board ids the tool needs (ClickUp needs all three; Trello needs none) |
+| `taskBoard.moveBy` | `"list"` \| `"status"` | `"list"` | How a stage transition is shown on the board |
+| `taskBoard.subTickets` | `"card"` \| `"native-subtask"` | `"card"` | Sub-ticket representation |
+| `taskBoard.stageMap` | object | — | Generic stage → this board's list or status name. Required keys `refine`, `ready`, `inProgress`, `review`, `done`; optional `designReview`. Legacy name: `lists` — read it when `stageMap` is absent, and write `stageMap` when creating or editing a config |
+| `taskBoard.labels.epic` / `.subTask` | string | — | Tool-specific label ids; omit to skip labelling |
+| `designSystem.projectId` | string | — | DesignSync project id |
+
+Reject a config with an unknown top-level key or a `mode` outside the two values, and say which key is wrong, rather than guessing. Per-ticket or per-branch overrides are not supported; nothing in two real trials needed them.
+
 ### First-run bootstrap
 
 If `.claude/pipeline.json` doesn't exist when `sdlc-manager` is invoked on a project, treat this as a one-time setup conversation before running any stage — ask once, covering both of the following together, not in separate follow-up passes:
@@ -116,7 +138,7 @@ Config shape (`.claude/pipeline.json`):
   "taskBoard": {
     "tool": "trello",
     "boardUrl": "https://trello.com/b/XXXXXXXX/board-name",
-    "lists": {
+    "stageMap": {
       "refine": "To Refine",
       "ready": "Ready",
       "inProgress": "In Progress",
@@ -133,10 +155,10 @@ Config shape (`.claude/pipeline.json`):
 ```
 
 - `tool` names which integration to use (only whatever MCP tools/skills are actually available in the session — don't assume one is connected without checking). Also check the connection can reach the right workspace: in the `virtual-agent-office` trial the ClickUp connector was authorized for a different workspace than the user's space and had to be reconnected.
-- `moveBy` (`"list"` default, or `"status"`) says how a stage transition is shown. Trello moves cards between lists; ClickUp (and Jira, Linear) keep items in one list and change their status. With `"status"`, the `lists` map holds status names instead of list names — same generic keys, same rule of reading from the map.
+- `moveBy` (`"list"` default, or `"status"`) says how a stage transition is shown. Trello moves cards between lists; ClickUp (and Jira, Linear) keep items in one list and change their status. With `"status"`, the `stageMap` map holds status names instead of list names — same generic keys, same rule of reading from the map.
 - `subTickets` (`"card"` default, or `"native-subtask"`): when the board has real subtasks and dependency links (ClickUp, Jira, Linear), create sub-tickets as native subtasks of the epic and encode `depends-on:` as native dependencies as well as in the description. The board then shows what blocks what without opening cards.
-- `lists` maps the pipeline's generic stage names to this board's actual list names, since boards vary. Read from this map rather than hardcoding a list name. `designReview` is optional — only needed for projects using the design/build sub-ticket split (see stage 3's "Approval" bullet above); omit it if the project never splits design out, or if it's fine falling back to no board-visible approval step (the checklist line in the design sub-ticket's body still works as a paper trail either way).
-- `labels` is optional. If present, attach `labels.epic` to the epic/tracker item and `labels.subTask` to each sub-ticket item when creating them, so epic vs. sub-ticket is visually distinguishable on the board (in addition to the naming convention below). If the board tool can't create/rename labels via the tools available in-session, don't try to work around that mid-pipeline — set up the label mapping once during the first-run bootstrap (find or create suitable labels, get the user to name them if the tool can't do it programmatically) and record the resulting identifiers in this config, same as `lists`. If `labels` is absent, skip label attachment entirely — it's a visual nice-to-have, not required for the pipeline to function.
+- `stageMap` (legacy name `lists`) maps the pipeline's generic stage names to this board's actual list names, since boards vary. Read from this map rather than hardcoding a list name. `designReview` is optional — only needed for projects using the design/build sub-ticket split (see stage 3's "Approval" bullet above); omit it if the project never splits design out, or if it's fine falling back to no board-visible approval step (the checklist line in the design sub-ticket's body still works as a paper trail either way).
+- `labels` is optional. If present, attach `labels.epic` to the epic/tracker item and `labels.subTask` to each sub-ticket item when creating them, so epic vs. sub-ticket is visually distinguishable on the board (in addition to the naming convention below). If the board tool can't create/rename labels via the tools available in-session, don't try to work around that mid-pipeline — set up the label mapping once during the first-run bootstrap (find or create suitable labels, get the user to name them if the tool can't do it programmatically) and record the resulting identifiers in this config, same as `stageMap`. If `labels` is absent, skip label attachment entirely — it's a visual nice-to-have, not required for the pipeline to function.
 
 **Entry points (generic, board-agnostic):**
 - **A — requirement given as a prompt:** refine it in-chat, then, if `taskBoard` is configured, create it as a card/issue in the `ready` list (skip `refine` if already fully scoped — no open questions left unresolved).
@@ -195,13 +217,14 @@ When the user asks to resume or check status of a pipeline already in progress (
 - Never fabricate a stage's output (e.g. don't invent a design doc or test results) — dispatch to the real subagent/skill or ask the user to provide it.
 - If a requirement is ambiguous, resolve it at intake, not mid-pipeline.
 - Report per-stage status as you go: what stage ran, which skill/agent handled it, and the outcome.
+- Verify a stage's pass/fail claim yourself before reporting it, and trust machine-readable output over a summary line. In the `virtual-agent-office` trial, on a heavily loaded machine, vitest's text summary reported 24 and then 26 test files out of 30 on disk, while `--reporter=json` listed all 30 as passed. Count against the files on disk.
 - If a subagent stops mid-stage (rate limit, API error), check what it already wrote (`git status` in its worktree), then resume the same agent with its context rather than starting a fresh one.
 - Missing a specialist agent is not a blocker — dispatch to `general-purpose` and move on. Only stop and ask if `general-purpose` genuinely can't do the stage (e.g. it needs credentials/access the user hasn't granted).
 
 ## Open TODOs before this skill graduates out of `in-progress/`
 
 - [ ] Build specialist agents/skills for UX/UI design, technical design, coding, test, deploy, monitor stages — as-needed, once general-purpose proves insufficient for a given stage on real work, not speculatively
-- [ ] Decide the concrete shape of `.claude/pipeline.json` once used on a real project (per-ticket overrides? per-branch?). Two real configs now exist; the `virtual-agent-office` one added `deployTarget`, `taskBoard.moveBy`, `taskBoard.subTickets` and board ids (`workspaceId`/`spaceId`/`listId`). Still needed: one written schema, and a rename of `lists` to something neutral like `stageMap`
+- [x] Decide the concrete shape of `.claude/pipeline.json` — see "Schema" under Config (2026-09-28). `lists` renamed to `stageMap`, with `lists` still read as a legacy alias. Per-ticket and per-branch overrides left out: no trial needed them
 - [ ] Validate the resume algorithm on a real interrupted pipeline (not yet exercised)
 - [x] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended — see dry run notes below (2026-08-11)
 - [x] Validate manual-mode stop-and-confirm behavior and real `.claude/pipeline.json` config parsing — see dry run notes below (2026-08-11)
@@ -267,3 +290,17 @@ This closes out the "no live run yet" gap from Run 1–3. The stage-dispatch mec
 - **Stage cost:** the most expensive stages were UX/UI design (~120–190k per round) and the Pixi coding stage (~220k). Technical design stages cost 45–85k, and fix agents 55–130k.
 
 **Left open:** walker polish follow-up ([001.9]), the list view ([001.6]) and deploy via CLI ([001.7], on hold).
+
+## Live run notes (2026-09-26/28) — `virtual-agent-office` trial, epic 001 close-out
+
+**Runs — [001.6], [001.9] (resumed from a handoff), then two new stories [001.10] (Artifact pixel sprites as the default theme, Kenney switchable) and [001.11] (the theme covers the whole office).** Manual mode, ClickUp, one worktree per ticket, PRs #6–#9. Stage 3 was skipped for 001.10/001.11 because the approved design v3 already existed; stage 4 read the design's own drawing code as its spec.
+
+**Findings, already folded into this file:**
+- **Schema:** the config grew `deployTarget`, board ids, `moveBy` and `subTickets` without a written schema. See "Schema"; `lists` is now `stageMap`.
+- **Hidden tab clicks:** the Chrome tab stayed `hidden`, and in one run real clicks never reached the page. See the stage 7 note.
+- **Unreliable test summary:** under heavy machine load the vitest text summary under-counted test files. See Rules.
+
+**Other patterns reinforced, no new fix needed:**
+- **Port, don't redraw:** for "make it look like the design", stage 5 copied the design's drawing functions verbatim into an asset generator and pixel-diffed the output against the design (105/105 frames identical). For a refactor that must not change the look, it recorded a baseline of the old draw calls *before* touching code and proved 0 differing pixels after. Both are cheap, strong evidence; ask for them in the stage 5 prompt.
+- **Reviewer claims need checking:** one of two `code-review` findings on 001.11 was wrong (it said a transparent canvas would show the page background; the container already had the dark background). Read the code before dispatching a fix.
+- **Stage cost:** 001.10 ≈ 420k tokens (design 108k, coding 186k, review 82k, fix 46k); 001.11 ≈ 500k (design 120k, coding 250k, review 83k, fix 47k). Coding stays the most expensive stage when it includes asset generation.
