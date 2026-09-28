@@ -225,7 +225,11 @@ When the user asks to resume or check status of a pipeline already in progress (
 
 - [ ] Build specialist agents/skills for UX/UI design, technical design, coding, test, deploy, monitor stages — as-needed, once general-purpose proves insufficient for a given stage on real work, not speculatively
 - [x] Decide the concrete shape of `.claude/pipeline.json` — see "Schema" under Config (2026-09-28). `lists` renamed to `stageMap`, with `lists` still read as a legacy alias. Per-ticket and per-branch overrides left out: no trial needed them
-- [ ] Validate the resume algorithm on a real interrupted pipeline (not yet exercised)
+- [ ] Validate the resume algorithm on a real interrupted pipeline (not yet exercised). The `virtual-agent-office` close-out resumed from a handoff doc plus git state, not by reading the board
+- [ ] Run auto mode on a real project. It has only been exercised in dry runs; every real trial so far used manual mode
+- [ ] Exercise stages 8–9 on `virtual-agent-office`. Its deploy target is `local`, so deploy and monitor haven't run there; [001.7] deploy via CLI would be the first real test
+- [ ] Define graduation criteria for moving this skill out of `in-progress/` (e.g. which stages must have run live, on how many projects, in which modes)
+- [ ] Add guidance for handing a pipeline over between sessions: what a handoff doc must record (board and epic links, open decisions, worktrees, pending commits) and how the next session verifies it against the board and git before resuming
 - [x] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended — see dry run notes below (2026-08-11)
 - [x] Validate manual-mode stop-and-confirm behavior and real `.claude/pipeline.json` config parsing — see dry run notes below (2026-08-11)
 - [x] Design task board integration once a real trial actually needed one — see "Task board integration" section above (2026-08-12, `dormitory-management-system` trial)
