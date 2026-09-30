@@ -97,6 +97,7 @@ Every key the skill reads. Only `mode` is required; each optional block is expla
 | `taskBoard.stageMap` | object | — | Generic stage → this board's list or status name. Required keys `refine`, `ready`, `inProgress`, `review`, `done`; optional `designReview`. Legacy name: `lists` — read it when `stageMap` is absent, and write `stageMap` when creating or editing a config |
 | `taskBoard.labels.epic` / `.subTask` | string | — | Tool-specific label ids; omit to skip labelling |
 | `designSystem.projectId` | string | — | DesignSync project id |
+| `git.mergeMethod` | `"merge"` \| `"squash"` \| `"rebase"` | — (ask) | How a ticket's PR lands on the main branch (`gh pr merge --merge` / `--squash` / `--rebase`). A per-project preference: ask at bootstrap instead of assuming |
 
 Reject a config with an unknown top-level key or a `mode` outside the two values, and say which key is wrong, rather than guessing. Per-ticket or per-branch overrides are not supported; nothing in two real trials needed them.
 
@@ -197,7 +198,7 @@ Config shape (`.claude/pipeline.json`):
 
 When two sub-tickets have no `depends-on:` between them, their stages can run at the same time — but only safely with these steps, all learned in the `virtual-agent-office` trial:
 
-- **One git worktree per ticket** (`git worktree add -b <branch> ../<repo>-<ticket> main`). Two coding agents in one checkout overwrite each other. Tell each agent which directory is its own and which it must not touch, and not to kill processes it didn't start.
+- **One git worktree per ticket** (`git worktree add -b <branch> ../<repo>-<ticket> main`). Two coding agents in one checkout overwrite each other. Tell each agent which directory is its own and which it must not touch, and not to kill processes it didn't start. Remove the worktree before `gh pr merge --delete-branch`: git can't delete a branch that a worktree still has checked out, and `gh` then skips deleting the remote branch as well.
 - **Settle the shared contract before coding starts.** If both tickets need the same glue (a composition root, a shared store, an app wrapper), the orchestrator writes it once and places byte-identical copies in both worktrees, marked "do not modify". Identical additions merge cleanly; independent inventions of the same glue don't. Treat this glue as reviewable code — in the trial it carried the only high-severity bug of its round.
 - **Split shared files by area:** give each ticket its own i18n key namespace, its own CSS file, and a one-line change to the app entry file. Expect conflicts anyway in `package.json`/lockfile, locale files and the app entry — merge the first PR, rebase the second onto main, resolve by keeping both sides, regenerate the lockfile from main's version, and rerun every check before pushing.
 - **Test dependent UI tickets together.** If one ticket renders what another makes clickable (e.g. a scene and the drawer it opens), run stage 7 on a scratch integration worktree that applies both diffs, before either merges.
@@ -216,6 +217,7 @@ When the user asks to resume or check status of a pipeline already in progress (
 
 - Never fabricate a stage's output (e.g. don't invent a design doc or test results) — dispatch to the real subagent/skill or ask the user to provide it.
 - If a requirement is ambiguous, resolve it at intake, not mid-pipeline.
+- Start every stage dispatch's `Agent` description with a stage tag, `[stage:<key>]`, using the stage keys from the config schema (`tickets`, `uxui`, `design`, `coding`, `review`, `test`, `deploy`, `monitor`). The `virtual-agent-office` Claude Code hook reads this tag to seat the subagent in the matching role room; without it every dispatch lands at the Freelancer desk. The tag costs nothing elsewhere, so use it on every project.
 - Report per-stage status as you go: what stage ran, which skill/agent handled it, and the outcome.
 - Verify a stage's pass/fail claim yourself before reporting it, and trust machine-readable output over a summary line. In the `virtual-agent-office` trial, on a heavily loaded machine, vitest's text summary reported 24 and then 26 test files out of 30 on disk, while `--reporter=json` listed all 30 as passed. Count against the files on disk.
 - If a subagent stops mid-stage (rate limit, API error), check what it already wrote (`git status` in its worktree), then resume the same agent with its context rather than starting a fresh one.
@@ -308,3 +310,30 @@ This closes out the "no live run yet" gap from Run 1–3. The stage-dispatch mec
 - **Port, don't redraw:** for "make it look like the design", stage 5 copied the design's drawing functions verbatim into an asset generator and pixel-diffed the output against the design (105/105 frames identical). For a refactor that must not change the look, it recorded a baseline of the old draw calls *before* touching code and proved 0 differing pixels after. Both are cheap, strong evidence; ask for them in the stage 5 prompt.
 - **Reviewer claims need checking:** one of two `code-review` findings on 001.11 was wrong (it said a transparent canvas would show the page background; the container already had the dark background). Read the code before dispatching a fix.
 - **Stage cost:** 001.10 ≈ 420k tokens (design 108k, coding 186k, review 82k, fix 46k); 001.11 ≈ 500k (design 120k, coding 250k, review 83k, fix 47k). Coding stays the most expensive stage when it includes asset generation.
+
+## Live run notes (2026-09-28/30) — `virtual-agent-office` trial, epic 002
+
+**Runs — [002.1] schema + collector, [002.2] Claude Code hook adapter, [002.3] design v4, [002.4] RealFeed (PR A) and Lead desk (PR B), plus a new epic 003 split.** Manual mode, ClickUp, PRs #10–#13. The session resumed from a handoff doc; the board and git agreed, so nothing needed correcting.
+
+**Findings, already folded into this file:**
+- **Stage tags:** the project's own Claude Code hook seats a subagent by `[stage:<key>]` in the Agent `description` (not the prompt). See Rules.
+- **Worktree before merge:** `gh pr merge --delete-branch` couldn't delete a branch still checked out in a worktree, and then skipped the remote branch too. See "Running sub-tickets in parallel".
+- **Merge method is a preference:** the user switched from rebase to merge commits mid-epic ("rebased history looks unfinished"). See `git.mergeMethod`.
+
+**Other patterns reinforced or new, no skill change needed yet:**
+- **Shared contract file worked:** the orchestrator wrote `stages.ts` once into both worktrees (002.2 and 002.4 in parallel). Only README conflicted. But the second PR also had to regenerate the first PR's replay fixtures, because it widened a shared type; plan a separate `test(...)` commit for that after the rebase.
+- **Stage 4 can overturn the ticket:** the 002.2 design agent ran real `claude` sessions and found that `http` hooks can't meet two acceptance criteria. It switched to command hooks. Update the ticket text at approval so the board matches what is built.
+- **Stage 7 must look, not only read:** the first live check of 002.4 PR A read the drawer through `innerText` and missed that the Lead list had no CSS at all. PR B's coding agent found it from a screenshot. Screenshot every new panel and state.
+- **Real clicks can work:** in PR B's check a real mouse click on the canvas worked while `visibilityState` was `hidden`. Try the real click first and fall back to `element.click()`.
+- **Environment hiccups:**
+  - Auto-mode safety-classifier outages happened twice. Stop after 3–4 consecutive "no verdict" errors and tell the user; the turn ends at 10.
+  - After `/login`, the Chrome extension lost its page connection until the user fixed it.
+  - One `code-review` fork stalled (600 s watchdog); a rerun worked.
+  - The ClickUp connector saw two workspaces, so every call needed `workspace_id`.
+- **Scope changes at design review:** the user dropped per-vendor visuals entirely and added a Lead desk and a learned-roles model, which became epic 003. Cheap questions at intake ("what should differ per vendor?", "who defines roles for someone else's agents?") would have saved a design round.
+- **Stage cost:**
+  - 002.1 ≈ 440k tokens: design 105k, coding 162k, review 88k, fixes 106k + 68k.
+  - 002.3 ≈ 390k: two rounds, 309k + 78k.
+  - 002.2 ≈ 670k: design 183k, coding 274k, review 97k + a stalled run, fix 113k.
+  - 002.4 PR A ≈ 740k: design 261k, coding 337k, review 110k, fixes 89k + 63k.
+  - 002.4 PR B ≈ 520k: coding 257k, review 95k, fix 169k.
