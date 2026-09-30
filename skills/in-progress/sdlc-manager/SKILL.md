@@ -213,6 +213,32 @@ When the user asks to resume or check status of a pipeline already in progress (
 4. **Resume from the next stage after the last one with real, verified output**, respecting `depends-on:` — don't resume a sub-ticket whose blocking dependency isn't actually finished, even if its card looks further along.
 5. Report what was found per sub-ticket (list vs. actual state, any corrections made) before resuming work, so the user can catch a wrong reconstruction before more stages run on top of it.
 
+## Dispatching a stage: when to spawn, and how to brief
+
+A subagent starts with no context and re-reads what it needs, so every spawn costs tokens the orchestrator would not have spent doing the work itself. Measured on `virtual-agent-office`: about 1.1M subagent tokens for three mid-size PRs (design ~180k, coding 90–340k each, review 65–110k each, a fix pass 55–170k, a live browser check ~115k). Spawn when it pays, not by default.
+
+**Do the stage inline (no spawn) when** the change is small and already decided: roughly three files or fewer, no new design decision, and the orchestrator already holds the needed context. Design-only reuse checks, one-line fixes from a review finding, and README/config edits belong here.
+
+**Spawn when** at least one of these holds: two or more independent tickets can run in parallel; the stage is read-heavy exploration whose raw output would bloat the orchestrator's context; a review or live check benefits from fresh eyes; or the coding stage is large. State in the status line why a spawn was worth it.
+
+**Every brief must let an agent with zero context finish without asking.** Put these in the prompt, in this order, and keep each to a line or two:
+
+1. **Goal and ticket**: ticket id/link and the outcome wanted, in one or two sentences.
+2. **Scope**: what to change, and what not to touch (other worktrees, files owned by a sibling PR, the main checkout).
+3. **Where**: the absolute path of its worktree and branch. Say "use absolute paths, or `cd` inside every Bash call; your shell cwd is another directory". Subagents do not inherit the orchestrator's cwd, and a skill that reviews "the current diff" then reviews the wrong repo (this cost a full review round). For reviews, hand over a patch file (`git add -N . && git diff > file`, then `git reset -q`) and tell the agent not to invoke cwd-based skills.
+4. **Read first**: the exact files/sections that hold the spec (design doc path and section numbers, ticket text). Point to files and line ranges; do not paste whole documents and do not say "explore the repo". Say which claims to verify against real code and to report disagreements.
+5. **Decisions already made**: a short list, so the agent does not reopen them (merge method, rejected options, approved limits).
+6. **Constraints**: runtime version (e.g. `nvm use 24`), no commit/push, no new dependencies, comment density and naming like the surrounding code, never kill processes it did not start.
+7. **How to verify**: the exact commands, and how to trust them (JSON reporter over text summary; count test files against disk; write a failing test first where feasible).
+8. **Report format**: ask for a short fixed-field report (files changed, test counts, deviations from the design with reasons, what needs a live check, decisions for the orchestrator). No code dumps. Put long findings in a file and return a summary of about ten lines.
+
+**Keep the cost down:**
+- Pass the previous stage's output as a file path plus a short summary of its decisions, not as pasted text.
+- Give a fix agent only the confirmed findings, each with file:line and the intended fix. Read the code yourself first and drop findings you cannot confirm.
+- Continue a related agent with `SendMessage` (it keeps its context) instead of starting a fresh one when the follow-up touches the same files.
+- Read-only stages (design, review) must not edit files; say so, so they do not spend tokens on scratch work.
+- Launch independent agents in one message so they run in parallel, and do not poll them; wait for their completion notices.
+
 ## Rules
 
 - Never fabricate a stage's output (e.g. don't invent a design doc or test results) — dispatch to the real subagent/skill or ask the user to provide it.
@@ -337,3 +363,17 @@ This closes out the "no live run yet" gap from Run 1–3. The stage-dispatch mec
   - 002.2 ≈ 670k: design 183k, coding 274k, review 97k + a stalled run, fix 113k.
   - 002.4 PR A ≈ 740k: design 261k, coding 337k, review 110k, fixes 89k + 63k.
   - 002.4 PR B ≈ 520k: coding 257k, review 95k, fix 169k.
+
+## Live run notes (2026-09-30) — `virtual-agent-office` trial, epic 002 round 2
+
+**Runs — [002.5] liveness/dedupe/idle/capability flags and [002.7] connection troubleshooting (raised from user feedback after first real use), one tech design, three parallel PRs (#14 collector, #15 app idle, #16 connection UI), manual mode.**
+
+**Findings, already folded into this file ("Dispatching a stage"):**
+- **Review ran on the wrong repo:** the `code-review` skill reviews the cwd diff, and a subagent's cwd is not the worktree. The first review round reported findings for a different repository. Hand reviewers a patch file and absolute paths.
+- **Decide spawning by size:** the user saw the Lead handle nearly everything itself in real use; forcing spawns to fill the office would only add tokens. Spawn for parallelism, read-heavy work and fresh-eyes review.
+
+**Other patterns, no skill change needed yet:**
+- **A contract commit first worked:** the orchestrator wrote the shared type change once (`RunStatus += 'idle'`, capabilities type) and branched three worktrees from it. Keep the contract commit's formatting clean: its one over-long line failed `format:check` in two PRs. Run prettier on it before the branches fan out.
+- **Merge order follows CI:** with a shared commit failing CI in two PRs, merge the PR that carries the fix first, then merge main into the others. No force-push needed.
+- **Reviewers earned their cost:** the collector review found a late-`session.end` hole (reaped run not remembered), unclamped producer timestamps and a dropped stage on resume; the connection-UI review found a port-change button that did nothing with a `#hash` in the URL. The design doc was wrong in two places (8 of 13 fixtures change, not 12; stage carry-over only within one main generation), so ask design agents to verify claims against code.
+- **Stage cost:** design 181k; coding 164k (collector), 93k (app idle), 129k (connection UI); reviews 107k, 66k, 92k plus ~36k wasted; fix passes 68k and 59k; live browser check 115k. Total about 1.1M.
