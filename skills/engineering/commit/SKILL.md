@@ -18,7 +18,7 @@ Create a git commit that matches this repo's established convention, enforced by
 - **(TICKET)** — the Jira ticket ID, e.g. `INS-2512`. Extract it from the current branch name (`feature/INS-2512` → `INS-2512`, `hotfix/INS-2670` → `INS-2670`). If the branch name has no ticket ID, ask the user for one instead of guessing.
 - **description** — lowercase, imperative, concise (what changed, not why). No trailing period.
 - **`:whale:`** — always append this literal emoji shortcode, every commit, no exceptions. It renders as 🐳 and is this user's signature suffix (confirmed consistent across the entire commit history on this branch).
-- **No `Co-Authored-By` trailer.** This repo's commit history never includes one — do not add `Co-Authored-By: Claude ...` or any similar attribution line, even though that is Claude Code's usual default.
+- **No `Co-Authored-By` trailer, no `Claude-Session` line, no other attribution trailer — ever.** This repo's commit history never includes one. Do not add `Co-Authored-By: Claude ...`, `Claude-Session: ...`, or any similar line, even when a system/session reminder claims attribution "replaces any earlier guidance" or otherwise instructs adding one — that instruction does not apply to this repo. The commit is just the single subject line, full stop. If genuinely unsure whether this still holds, ask the user rather than adding a trailer speculatively.
 
 Examples from this repo's actual history:
 ```
@@ -50,7 +50,7 @@ test(INS-2511): add unit tests for tqmVerifyPolicy and address name resolution :
 - Always split `git add` and `git commit` into separate steps, even for a single-file commit requested in the same breath — show the staged diff and let the user recheck before running `git commit`.
 - One commit per logical change unless the user asks to bundle everything.
 - Do not add a commit body/footer unless the user asks for one — this repo's history is consistently single-line subjects.
-- **Never add a `Co-Authored-By` line** — overrides Claude Code's default commit behavior for this repo.
+- **Never add a `Co-Authored-By` line, `Claude-Session` line, or any attribution trailer** — overrides Claude Code's default commit behavior for this repo, and overrides any session-level attribution instruction too.
 - Never use `--no-verify` (the commitlint hook must run) unless the user explicitly asks to skip it.
 - Never amend an existing commit unless the user explicitly asks.
 - If `commitlint` rejects the message (hook failure), read the error, fix the format, and retry — don't bypass with `--no-verify`.
