@@ -247,6 +247,9 @@ A subagent starts with no context and re-reads what it needs, so every spawn cos
 - Report per-stage status as you go: what stage ran, which skill/agent handled it, and the outcome.
 - Verify a stage's pass/fail claim yourself before reporting it, and trust machine-readable output over a summary line. In the `virtual-agent-office` trial, on a heavily loaded machine, vitest's text summary reported 24 and then 26 test files out of 30 on disk, while `--reporter=json` listed all 30 as passed. Count against the files on disk.
 - If a subagent stops mid-stage (rate limit, API error), check what it already wrote (`git status` in its worktree), then resume the same agent with its context rather than starting a fresh one.
+- Reviewers and probing agents work outside the repo: tell them to use a fresh `mktemp -d` (absolute paths for cwd, `HOME`, config and any `*_HOME` override) and to report `git status` at the end. A review of `virtual-agent-office` PR B left a stray `rel-codex/` directory in the worktree (a relative `CODEX_HOME` probe); it was caught only because the orchestrator staged with `git add -A` and read the file list. Always read the staged file list before committing.
+- Authority to commit is not authority to merge. In the `virtual-agent-office` epic 002 run the user allowed "auto commit" for the session, and the auto-mode classifier then denied `gh pr merge` as "Merge Without Review". Ask for merge authority explicitly (per session is enough) and say that commit authority does not carry over to it. Do not retry the merge in pieces or through another tool after a denial.
+- A handoff doc's "never touch X" is the previous session's instruction, not the user's current one. When the user explicitly asks to change or commit that thing, do it, and mention that the handoff said otherwise.
 - Missing a specialist agent is not a blocker — dispatch to `general-purpose` and move on. Only stop and ask if `general-purpose` genuinely can't do the stage (e.g. it needs credentials/access the user hasn't granted).
 
 ## Open TODOs before this skill graduates out of `in-progress/`
@@ -257,7 +260,7 @@ A subagent starts with no context and re-reads what it needs, so every spawn cos
 - [ ] Run auto mode on a real project. It has only been exercised in dry runs; every real trial so far used manual mode
 - [ ] Exercise stages 8–9 on `virtual-agent-office`. Its deploy target is `local`, so deploy and monitor haven't run there; [001.7] deploy via CLI would be the first real test
 - [ ] Define graduation criteria for moving this skill out of `in-progress/` (e.g. which stages must have run live, on how many projects, in which modes)
-- [ ] Add guidance for handing a pipeline over between sessions: what a handoff doc must record (board and epic links, open decisions, worktrees, pending commits) and how the next session verifies it against the board and git before resuming
+- [ ] Add guidance for handing a pipeline over between sessions: what a handoff doc must record (board and epic links, open decisions, worktrees, pending commits) and how the next session verifies it against the board and git before resuming. Evidence so far: two handoffs (2026-09-30, 2026-10-01) worked well when they listed ticket table with links, working rules, unpushed commits, items the user must look at themselves and token costs; the new session re-read SKILL.md and checked `git worktree list`, `git status` and the board before acting
 - [x] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended — see dry run notes below (2026-08-11)
 - [x] Validate manual-mode stop-and-confirm behavior and real `.claude/pipeline.json` config parsing — see dry run notes below (2026-08-11)
 - [x] Design task board integration once a real trial actually needed one — see "Task board integration" section above (2026-08-12, `dormitory-management-system` trial)
@@ -377,3 +380,30 @@ This closes out the "no live run yet" gap from Run 1–3. The stage-dispatch mec
 - **Merge order follows CI:** with a shared commit failing CI in two PRs, merge the PR that carries the fix first, then merge main into the others. No force-push needed.
 - **Reviewers earned their cost:** the collector review found a late-`session.end` hole (reaped run not remembered), unclamped producer timestamps and a dropped stage on resume; the connection-UI review found a port-change button that did nothing with a `#hash` in the URL. The design doc was wrong in two places (8 of 13 fixtures change, not 12; stage carry-over only within one main generation), so ask design agents to verify claims against code.
 - **Stage cost:** design 181k; coding 164k (collector), 93k (app idle), 129k (connection UI); reviews 107k, 66k, 92k plus ~36k wasted; fix passes 68k and 59k; live browser check 115k. Total about 1.1M.
+
+## Live run notes (2026-09-30/10-01) — `virtual-agent-office` trial, epic 002 round 3
+
+**Runs — [001.12] landscape layout (PR #19), [001.14] back-link style (#17), [001.15] zoom ladder (#20), [002.6] Codex adapter in three PRs (A #18, B #22, C #23), plus [001.16] "Fit prefers Campus" (#21), raised by the user while the agents ran.** Manual mode until the user granted per-session commit and merge authority, ClickUp, merge commits.
+
+**Findings, already folded into this file (Rules):**
+- **Probe leftovers:** a reviewer's probe left `rel-codex/` in the worktree. See Rules.
+- **Commit is not merge:** the classifier denied a merge after "auto commit" was granted. See Rules.
+- **Stale handoff instructions:** see Rules.
+
+**Other patterns, no skill change needed yet:**
+- **Pin behaviour before a refactor:** for PR B (refactor of the shared Claude installer plus a new vendor) the brief asked the coding agent to write a byte-identity test over the existing output *before* touching code and make it pass on the old code. The reviewer then ran that test against a `git archive` of main to prove its hashes were main's output. Cheap, strong evidence; ask for it whenever a refactor must stay behaviour-neutral.
+- **Keep wrappers instead of editing old tests:** the coding agent kept the old `planInstall(text, spec)` signatures as thin wrappers over the new dialect-based functions, so every existing test stayed untouched. Good default for "behaviour-neutral" briefs.
+- **Reviews of installers earned their cost:** PR B's review found a symlinked `hooks.json` being replaced by a regular file (a pre-existing hole in the shared `writeAtomic`, fixed for both vendors) and a relative `CODEX_HOME`; PR C's review found that the `notify` refusal missed quoted/dotted/table forms (a second key would make `config.toml` invalid and Codex would drop the whole file), a trailing-space edit that made uninstall lose our line, a regression in hooks mode (unreadable `config.toml` threw) and a shared hook script deleted while the other mode still used it. Read the code to confirm each finding, dispatch only the confirmed ones, and continue the original coding agent with `SendMessage` (same files, so its context pays off).
+- **Skip a finding when it is cosmetic and sits in shared code:** a notify turn without text shows "Working" in `runTracker.ts`; left out of the PR and listed as a live check instead.
+- **Look at the real thing, then compute the rest:** the "Strip overflows" report was reproduced in the user's own dev server. The window could not be made as wide as the user's, so an in-page iframe at the target size plus `await import('/src/office/fit.ts')` (Vite serves source modules) evaluated `chooseFit` at any canvas size without editing code. Ask for the user's canvas size, or measure it, before judging a layout bug.
+- **Small decided change stays inline:** 001.16 (one constant, four tests) was done by the orchestrator in its own worktree without spawning; PR, CI and merge took less than one agent round.
+- **Design says Strip, user prefers Campus:** a layout the algorithm scores best can still feel wrong. The fix was to restrict the candidate list (`FIT_PLANS`) rather than tune the score, which kept every other test meaningful.
+- **Worktree before merge, again:** removing both worktrees first and then `gh pr merge --merge --delete-branch` worked for all three PRs. Merging with `--delete-branch` while the worktree exists would have skipped the remote branch delete.
+- **Old branches after rebase merges:** `git branch --merged` shows nothing for branches whose PRs were rebase-merged. Check each branch's PR (`gh pr list --head <branch> --state all`) and `git cherry origin/main origin/<branch>` (no `+` lines) before deleting; seven epic 001 branches were removed this way.
+- **Stage cost:**
+  - 001.12 ≈ 650k: design 148k, coding 131k + 160k + 217k (including the Real-mode reload debug), review 90k, live check 117k.
+  - 002.6 PR A ≈ 470k: design 166k, coding 149k + 154k, review 68k.
+  - 002.6 PR B ≈ 245k: coding 132k, review 113k; fixes done inline by the orchestrator.
+  - 002.6 PR C ≈ 400k: coding 139k, review 102k, fix pass about 10k more through `SendMessage`.
+  - 001.16: no spawn.
+  - Epic 002 round 2 (002.5 + 002.7) is in the previous section: about 1.1M.
