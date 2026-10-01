@@ -239,6 +239,46 @@ A subagent starts with no context and re-reads what it needs, so every spawn cos
 - Read-only stages (design, review) must not edit files; say so, so they do not spend tokens on scratch work.
 - Launch independent agents in one message so they run in parallel, and do not poll them; wait for their completion notices.
 
+## Reusing agents and keeping context small
+
+Every continued agent re-reads its whole context on each turn, so a long-lived agent gets more expensive per follow-up as it grows, while a fresh agent pays once to re-read what it needs. Decide per follow-up; do not always reuse and do not always restart. Numbers from the `virtual-agent-office` trial (the agents' own token counters, cumulative):
+
+| Follow-up | Cost of the follow-up |
+|---|---|
+| Scoped code fixes on a coding agent (5–8 confirmed findings) | +8k to +13k |
+| Design revision on a design agent that renders and screenshots (three rounds) | +73k, +31k, +30k |
+| A fresh review agent reading a patch and the code | 79k to 113k |
+| A fresh coding agent for a PR | 80k to 150k |
+
+**Continue the same agent (`SendMessage`) when** the follow-up touches the files it already read, its context is still modest (a coding agent under roughly 100–150k counted tokens was cheap to continue; no upper limit has been measured), and the work is fixes, not new exploration. A scoped fix pass was about ten times cheaper than a fresh agent.
+
+**Start a fresh agent with a file-based brief when** the follow-up is unrelated to what the agent read, the agent's counter is already large (a design agent at 280k+ cost 30–70k even for small edits, because each round re-rendered and re-screenshotted), or the stage should have fresh eyes (review, live check). The heuristic threshold above is unvalidated: when you have the numbers for a fresh agent doing the same follow-up, record both and adjust.
+
+**Make a handoff file the unit of reuse, not the agent's memory.** Ask every stage agent to end with a short report (about ten lines) and to write long output (a design doc, review findings, a decision list) to a named file. The next stage gets the path, and a continued agent is optional rather than required. This is what let a PR B agent be replaced by a review agent and a fix agent without losing anything.
+
+**Orchestrator habits that kept its own context down:**
+- Do not paste tool output into prompts; pass file paths. Read design docs and review files by section, or not at all, when an agent will act on them.
+- Updating a ClickUp description means sending the whole description again (about 2.5k tokens each time; six round trips on one design ticket). Put progress in a single description edit at the end of a stage and use a comment for interim notes.
+- Keep agent reports short and fixed-field (see the brief checklist). Reports longer than about twenty lines go to a file.
+- Route read-only, mechanical stages (a live check against a scripted scenario, a patch review) to a cheaper model with the `Agent` tool's `model` setting when quality allows. Not yet tried here; try it on a live check first and compare the report with a previous run.
+
+## Handing a pipeline over between sessions
+
+The orchestrator's own context also grows (many ticket texts, agent reports, tool output). Hand off at a **ticket boundary** (a PR merged and the board updated), never in the middle of a stage, and before the context is so large that every turn is expensive. No threshold has been measured; use the client's context indicator and err on the early side. A new session also picks up changes to this skill, which is another reason to hand off after editing it.
+
+The handoff doc (one file, written by the orchestrator; the `handoff` skill can produce the shell) must hold, in this order:
+1. **Where things stand:** project path and repo, board ids and links, `pipeline.json` summary, and a ticket table (state, link, one note) for the epic in progress and the next ones.
+2. **Resume point:** the single next step, with the options and a recommendation.
+3. **Decisions not written elsewhere:** answers the user gave in chat, with dates. Anything already on the board or in a design doc is a link, not a copy.
+4. **Working rules for this project:** runtime version, push and auth commands, commit format and who confirms commits, ports the user owns, subagent pitfalls, tests and how to trust their output.
+5. **State to verify:** unpushed commits, open PRs, worktrees, branches pending deletion, services started.
+6. **Things the user will look at themselves** and have not been verified by any stage.
+7. **Reference files** outside the repo (design docs, patches) with paths.
+8. **Cost ledger:** tokens per stage so far, to fold into the run notes when the epic closes.
+9. **Authority granted in this session** (e.g. "auto commit", "auto merge") and its scope. Say plainly that it expires with the session; the new session must ask again.
+
+The new session must **verify, not trust**: re-read this skill, run `git worktree list`, `git status` and `git log` in the project, read the epic's board state, and compare each with the doc before acting. If they disagree, trust the evidence and tell the user (see "Resuming a pipeline"). Two handoffs in the trial (2026-09-30 and 2026-10-01) resumed this way without a correction.
+
 ## Rules
 
 - Never fabricate a stage's output (e.g. don't invent a design doc or test results) — dispatch to the real subagent/skill or ask the user to provide it.
@@ -260,7 +300,7 @@ A subagent starts with no context and re-reads what it needs, so every spawn cos
 - [ ] Run auto mode on a real project. It has only been exercised in dry runs; every real trial so far used manual mode
 - [ ] Exercise stages 8–9 on `virtual-agent-office`. Its deploy target is `local`, so deploy and monitor haven't run there; [001.7] deploy via CLI would be the first real test
 - [ ] Define graduation criteria for moving this skill out of `in-progress/` (e.g. which stages must have run live, on how many projects, in which modes)
-- [ ] Add guidance for handing a pipeline over between sessions: what a handoff doc must record (board and epic links, open decisions, worktrees, pending commits) and how the next session verifies it against the board and git before resuming. Evidence so far: two handoffs (2026-09-30, 2026-10-01) worked well when they listed ticket table with links, working rules, unpushed commits, items the user must look at themselves and token costs; the new session re-read SKILL.md and checked `git worktree list`, `git status` and the board before acting
+- [x] Add guidance for handing a pipeline over between sessions (2026-10-01, see "Handing a pipeline over between sessions"). Still to validate: a context threshold for handing off, and the continue-versus-fresh agent threshold. Original wish: what a handoff doc must record (board and epic links, open decisions, worktrees, pending commits) and how the next session verifies it against the board and git before resuming. Evidence so far: two handoffs (2026-09-30, 2026-10-01) worked well when they listed ticket table with links, working rules, unpushed commits, items the user must look at themselves and token costs; the new session re-read SKILL.md and checked `git worktree list`, `git status` and the board before acting
 - [x] Validate the auto-mode dependency chaining on an actual multi-stage run before trusting it unattended — see dry run notes below (2026-08-11)
 - [x] Validate manual-mode stop-and-confirm behavior and real `.claude/pipeline.json` config parsing — see dry run notes below (2026-08-11)
 - [x] Design task board integration once a real trial actually needed one — see "Task board integration" section above (2026-08-12, `dormitory-management-system` trial)
@@ -407,3 +447,23 @@ This closes out the "no live run yet" gap from Run 1–3. The stage-dispatch mec
   - 002.6 PR C ≈ 400k: coding 139k, review 102k, fix pass about 10k more through `SendMessage`.
   - 001.16: no spawn.
   - Epic 002 round 2 (002.5 + 002.7) is in the previous section: about 1.1M.
+
+## Live run notes (2026-10-01) — `virtual-agent-office` trial, epic 003 start
+
+**Runs — [003.3] design v5 (hire flow, Staff page, empty slots), [003.1] persisted roster in two PRs (#25 model and storage, #26 wiring and Recent freelancers), [001.13] (earlier the same day).** Manual mode until the user granted per-session commit and merge authority; ClickUp; merge commits.
+
+**Findings, already folded into this file:**
+- **Agent reuse and cost:** see "Reusing agents and keeping context small".
+- **Session handoff:** see "Handing a pipeline over between sessions".
+
+**Other patterns, no skill change needed yet:**
+- **Settle capacity and geometry before the design starts:** [003.3] took four rounds (413k tokens counted) because the user's answers changed the design between rounds: staff per role 3 to 6, then a re-layout of rooms, then the Co-workspace to 6 desks. Each change was cheap for the user to decide and cost 30–70k to redraw. Put "what is the capacity, and does the floor plan have to change?" into the intake questions of any ticket that adds rooms or limits.
+- **A design agent can also size the build:** asked to, it simulated `chooseFit` at ten canvas sizes against old and new world sizes and wrote the `layout.ts` change list and the list of tests pinning old numbers into the ticket. That turned "does the layout change need its own ticket?" into a number-based decision.
+- **Tech design versus code:** the 003.1 design agent found the brief was wrong in two places (the store does not build `profiles`/`personas`: the feed does, through an existing seam; Mock has 8 personas, not 9) and used the existing seam instead of the brief's idea. Keep asking design agents to verify the brief against code.
+- **Reviews caught real design gaps again:** PR A: a role's second agentType never matched (seating takes one per profile), role id `@lead` collided with the Lead pseudo-profile; PR B: an unreadable stored roster (newer version or corrupt) was overwritten by the first automatic recording, a reconnect or feed switch double-counted runs. Confirm each finding by reading the code, send only confirmed ones to the original coding agent.
+- **A live check earned its cost on a data-only change:** all seven checks passed, and it showed the visible effect the unit tests could not (the empty Real office packs four rooms to the left and leaves the right half of the floor blank), which became a design question for the next ticket.
+- **Commit authority is not merge authority** (see Rules); granting both for one session worked smoothly afterwards.
+- **Stage cost:**
+  - 003.3 design ≈ 413k over four rounds (279k, +73k, +31k, +30k).
+  - 003.1 tech design 97k; PR A: coding 82k, review 79k, fixes +13k; PR B: coding 80k, review 88k, fixes +8k, live check 69k. About 680k in total.
+  - [001.13]: no spawn.
