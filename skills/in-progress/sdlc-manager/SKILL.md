@@ -18,7 +18,7 @@ Orchestrator skill. Takes a raw requirement, breaks it into tickets, and drives 
 ## Pipeline stages
 
 1. **Requirement intake** — clarify scope with the user if the ask is underspecified. Do not proceed to ticketing on a vague requirement; ask.
-2. **Ticket breakdown** — split the requirement into tickets. Use the `ticket-card` skill's Mode 3 (split) to produce the sub-tickets, each following its Mode 1 template. For each ticket, decide whether it needs UX/UI work (anything touching a user-facing screen/flow) and mark it — this decides whether stage 3 runs for that ticket.
+2. **Ticket breakdown** — split the requirement into tickets, unless it needs no split or no ticket at all (see "Work units: with or without tickets" below). Use the `ticket-card` skill's Mode 3 (split) to produce the sub-tickets, each following its Mode 1 template. For each ticket, decide whether it needs UX/UI work (anything touching a user-facing screen/flow) and mark it — this decides whether stage 3 runs for that ticket.
    - **Design/build split**: when a ticket is UI-touching *and* is expected to involve a genuine new design decision (not pure reuse of an existing design-system pattern, not an already-approved import — see "If a project already has a Figma design" below), split it into two linked sub-tickets via the same Mode 3 `depends-on:` mechanism used for any other cross-ticket dependency: a **design sub-ticket** (stage 3 only) and a **build sub-ticket** (stages 4 onward, `depends-on:` the design sub-ticket). Skip the split entirely when there's no real design decision to make — the build ticket just runs stage 3 inline as a quick reuse-check with no separate approval step.
 3. **UX/UI design** — wireframes/mockups/flow. **Conditional**: only runs for tickets flagged as UI-touching in stage 2; skip straight to stage 4 for backend-only or infra-only tickets. Its output (screens, flows, states) feeds stage 4 as a constraint on the technical approach. If the design/build split from stage 2 applies, this stage runs entirely within the design sub-ticket.
    - Before publishing any design version (including v1), take one rendered look at it (screenshot/preview) and check it loads without JS errors and its main interactions work. An unchecked v1 shipped broken interactions in the `virtual-agent-office` trial, and each revision round cost 150–190k tokens — cheap checks up front save whole rounds.
@@ -97,6 +97,8 @@ Every key the skill reads. Only `mode` is required; each optional block is expla
 | `taskBoard.stageMap` | object | — | Generic stage → this board's list or status name. Required keys `refine`, `ready`, `inProgress`, `review`, `done`; optional `designReview`. Legacy name: `lists` — read it when `stageMap` is absent, and write `stageMap` when creating or editing a config |
 | `taskBoard.labels.epic` / `.subTask` | string | — | Tool-specific label ids; omit to skip labelling |
 | `designSystem.projectId` | string | — | DesignSync project id |
+| `repos.<name>` | absolute path | — | Repos a requirement may touch, by short name. Lets the orchestrator find each checkout without asking; without it, ask once per run which repos are involved |
+| `runsDir` | absolute path | single repo: `<repo>/.claude/runs`; several repos: `<parent of the repos>/.sdlc-runs` | Where run files and contracts for ticketless or multi-repo runs live (`<runsDir>/<slug>/run.md`, `contract.md`). Keep it outside every repo when more than one repo is involved |
 | `git.mergeMethod` | `"merge"` \| `"squash"` \| `"rebase"` | — (ask) | How a ticket's PR lands on the main branch (`gh pr merge --merge` / `--squash` / `--rebase`). A per-project preference: ask at bootstrap instead of assuming |
 
 Reject a config with an unknown top-level key or a `mode` outside the two values, and say which key is wrong, rather than guessing. Per-ticket or per-branch overrides are not supported; nothing in two real trials needed them.
@@ -117,7 +119,7 @@ Write the resulting `.claude/pipeline.json` (see shape above and in "Task board 
 
 Chain stages without stopping in between. Still:
 - Dispatch each stage as its own `Agent` call — foreground when the next stage depends on this stage's output (e.g. design must finish before coding starts), background only for genuinely independent work (e.g. monitoring after deploy).
-- Cross-ticket dependencies (a sub-ticket's `depends-on:` from Mode 3 splitting) apply per stage, not just once: if ticket B depends on ticket A, B's coding stage needs A's actual implementation output (e.g. the real API contract), not just A's design doc. Don't start B's coding off of A's design alone — wait for A's coding stage to finish.
+- Cross-ticket dependencies (a sub-ticket's `depends-on:` from Mode 3 splitting) apply per stage, not just once: if ticket B depends on ticket A, B's coding stage needs A's actual implementation output (e.g. the real API contract), not just A's design doc. Don't start B's coding off of A's design alone — wait for A's coding stage to finish, unless the two share an approved contract (see "Running sub-tickets in parallel (contract-first)"), in which case B codes against the contract's stubs and both integrate at the end.
 - Surface each stage's result to the user as it completes; don't wait until the end of the whole pipeline to report anything.
 
 ### Manual mode
@@ -194,16 +196,81 @@ Config shape (`.claude/pipeline.json`):
 - **If a project already has a Figma design**, don't re-derive it into HTML previews from scratch (that's only the fallback for projects with no existing design source) — import the real Figma frames into the `designSystem` project instead, via Claude Design's Figma-import ("Start with context" → Figma) so Figma stays the actual source of truth rather than something reconstructed from code/screenshots. Ask the user, per-project, whether Figma or the synced claude.ai/design copy is the system of record going forward — this changes whether stage 3 treats the design-system project as read-only reference (re-import from Figma when it changes) or as the thing it edits directly.
 - **Figma export is one-way (import only), verified 2026-08-12**: Claude Design (claude.ai/design) has no native export back to Figma (`.fig`) — checked live via the product's own Share → Export menu (PDF, Project HTML, PowerPoint, PNG, video, and a fixed list of "Connect destinations" that does not include Figma) and cross-checked with a web search, both agreeing. If a project needs Claude Design changes reflected back in Figma (e.g. to keep a read-only client-facing Figma view current), there is no automatic sync path — say so explicitly rather than assuming one exists, and the only options are manual: browser extensions like `html.to.design` to capture a Claude Design page into Figma, or exporting PNG/SVG and placing it on the Figma canvas by hand. This is a live product surface (labelled Beta) and can change — re-verify before relying on this if it's been a while.
 
-## Running sub-tickets in parallel
+## Running sub-tickets in parallel (contract-first)
 
-When two sub-tickets have no `depends-on:` between them, their stages can run at the same time — but only safely with these steps, all learned in the `virtual-agent-office` trial:
+Work is split the way a team splits it: one party writes down the **contract** (the seam between the pieces), then each ticket builds against the contract alone, so nobody waits for another's code. Integration happens once, at the end. This replaces the sequential rule under Auto mode ("wait for A's coding stage") for every pair of tickets whose seam is covered by an approved contract; tickets with no contract still follow that rule.
 
-- **One git worktree per ticket** (`git worktree add -b <branch> ../<repo>-<ticket> main`). Two coding agents in one checkout overwrite each other. Tell each agent which directory is its own and which it must not touch, and not to kill processes it didn't start. Remove the worktree before `gh pr merge --delete-branch`: git can't delete a branch that a worktree still has checked out, and `gh` then skips deleting the remote branch as well.
-- **Settle the shared contract before coding starts.** If both tickets need the same glue (a composition root, a shared store, an app wrapper), the orchestrator writes it once and places byte-identical copies in both worktrees, marked "do not modify". Identical additions merge cleanly; independent inventions of the same glue don't. Treat this glue as reviewable code — in the trial it carried the only high-severity bug of its round.
-- **Split shared files by area:** give each ticket its own i18n key namespace, its own CSS file, and a one-line change to the app entry file. Expect conflicts anyway in `package.json`/lockfile, locale files and the app entry — merge the first PR, rebase the second onto main, resolve by keeping both sides, regenerate the lockfile from main's version, and rerun every check before pushing.
-- **Test dependent UI tickets together.** If one ticket renders what another makes clickable (e.g. a scene and the drawer it opens), run stage 7 on a scratch integration worktree that applies both diffs, before either merges.
+Applies to sub-tickets in one repo (one worktree each) and to tickets in different repos (each repo's own checkout). The steps are the same.
+
+### Work units: with or without tickets
+
+The unit that runs in parallel is a **work unit**: one repo (or one area of a repo) plus what must be done there. A unit does not have to be a sub-ticket. Pick the lightest shape that keeps the work trackable:
+
+| Shape | When | Where the units live |
+|---|---|---|
+| **Sub-tickets** (default) | The work is large, spans days, or the team tracks it on a board | One ticket per unit, from `ticket-card` Mode 3 |
+| **One ticket, units inside** | One piece of work touches several repos but needs no separate tracking per repo | One ticket whose description has a `Scope by repo` section: per repo, what to change, files or areas if known, and `produces`/`consumes` for each contract. `ticket-card` Mode 1 writes it. The ticket moves through the stage lists as one item |
+| **No ticket** | The user gives a requirement in chat and wants it built, with no board entry | A run file, `<runsDir>/<slug>/run.md` (see "Where run files live"), written by the orchestrator: the requirement, the repos involved, the contract path, a units table (repo, branch, worktree, state, PR) and decisions made. It is the only state, so keep it current at every stage transition |
+
+Rules for all three:
+- **Resolve the repos at intake.** Take them from the requirement, then `repos` in `pipeline.json`; if the user named a repo not in `repos`, ask for its path once. Read each repo's entry points enough to say which units exist and which seams they share. Do not ask the user to list units; propose them and let the user correct.
+- **Splitting is the orchestrator's job, but the user approves the split** in manual mode: present the units table and the seams (one line each) before writing any contract.
+- Do not create a ticket just to satisfy the pipeline. With `taskBoard` configured and no ticket wanted, say so and run on the run file; offer to create the ticket at the end as a record if the user wants one.
+- A single-repo requirement with no real seam is not a parallel run: use one unit and the normal stages.
+- Everything below says "ticket" for brevity; read it as "unit" in the second and third shapes. Briefs, worktrees, contracts, review and the integration check work the same. The only difference is where status is written: board, ticket description, or the run file.
+
+**Where run files live.** The run file and the contract files are the only state of a ticketless run, so every session and every worktree must find them from the same place:
+- **Several repos:** `runsDir`, outside all repos (default `<parent of the repos>/.sdlc-runs/`). The contract goes in `<runsDir>/<slug>/contract.md`. Each unit's brief gives it as an absolute path. Nothing is added to any repo's tree, so there is nothing to ignore.
+- **One repo:** `<repo>/.claude/runs/<slug>/` is fine. Do not edit the repo's `.gitignore` for it. Instead, never stage it: add files by name, read the staged file list before every commit, and say in the run file's header that the directory is untracked on purpose.
+- The run file records the absolute path of every repo and worktree, so a session started from any directory can resume. On resume, look in `runsDir` (or the project's `.claude/runs/`) first; do not guess from the current directory.
+- A contract that the user wants to keep in a repo's history (for example an API spec) is copied there by a normal commit at the end, as a deliberate step. The working copy stays in `runsDir`.
+
+### 1. Decide whether to parallelise
+
+Run in parallel only when all hold: the tickets are independent *given a contract* (the dependency is on an interface, not on behaviour one ticket must discover by building), the seam can be written down in a page or less, and each ticket's file set is mostly its own. If the seam keeps moving (the consumer will not know what it needs until the producer exists), stay sequential and say why. Do this at stage 2 when `ticket-card` Mode 3 emits `depends-on:`: for each dependency, ask "could a contract replace this?" and mark the ticket `contract: <name>` instead of `depends-on:` when yes.
+
+### 2. Stage 4a: write the contract (orchestrator, before any coding)
+
+One contract per seam, in one file, at a path every party can read (a `contracts/<epic>-<seam>.md` in the repo that owns it, or a shared path outside all repos for cross-repo work; record the path in the epic). It holds only what the parties must agree on:
+
+- **Interface:** the exact shapes: endpoints with request/response and error codes, event names and payloads, shared types, DB columns/migrations, config keys, file formats. Real types or JSON examples, not prose.
+- **Ownership:** which ticket **produces** each item and which **consume** it.
+- **Behaviour rules the other side relies on:** ordering, idempotency, nullability, auth, limits, defaults.
+- **Fixtures:** one or two sample payloads (happy path and a typical error) that both sides test against.
+- **Version and change rule:** a version number, and that a party who needs a change stops and asks the orchestrator rather than editing its copy.
+
+Then:
+- **Get it approved** in manual mode (the user confirms the contract before fan-out; it is the cheapest place to catch a wrong split). In auto mode, a review agent with fresh eyes checks it against every ticket's text.
+- **Commit the contract first** and branch every ticket from that commit, so the contract is byte-identical everywhere. If it includes code (types, a composition root), run the formatter and linter on it before fan-out: a long line in the contract commit failed `format:check` in two PRs of the trial.
+- **Put the contract path and version in the epic and in each ticket**, with `contract: <path>@<version>`, produces/consumes noted. On a native-dependency board, do not add a blocking dependency between them; the contract is the link.
+
+### 3. Fan out: build against the contract, never against each other
+
+- One worktree (or one repo checkout) per ticket, own branch from the contract commit. Tell each agent which directory is its own, that the contract file is read-only, and not to kill processes it did not start.
+- **The producer** implements the contract. **The consumer** codes against a **stub or mock that comes from the contract's fixtures** (a mock server, a fake client, a typed interface), never against the producer's unfinished branch. Each side adds a **contract test**: the producer proves its output matches the fixtures and types; the consumer proves it handles the fixtures, including the error sample.
+- Dispatch all coding agents in one message (see "Dispatching a stage"). Put the contract path in every brief under "Read first", and under "Decisions already made" say that the contract is settled.
+- **Contract change requests:** an agent that finds the contract wrong or incomplete stops that part, finishes what it can, and reports the exact change it needs. The orchestrator decides, bumps the version, commits, and sends the new version to **every** affected party (`SendMessage` to a continued agent, or into the brief of a new one). Never let one side patch its copy. Count change requests in the status line: more than one or two per seam means the seam was wrong; stop and re-split.
+- Keep the other shared-file rules from the trial: give each ticket its own i18n key namespace, its own CSS file, and a one-line change to the app entry file. Expect conflicts anyway in `package.json`/lockfile, locale files and the app entry.
+
+### 4. Review per ticket, then integrate once
+
+- **Per-ticket review and unit tests** run in parallel, as usual, each against its own diff and the contract.
+- **Merge order:** merge the producer first when one exists, then rebase each consumer onto main, resolve conflicts by keeping both sides, regenerate the lockfile from main's version, rerun every check before pushing. Remove each worktree before `gh pr merge --delete-branch`: git cannot delete a branch a worktree has checked out, and `gh` then skips the remote branch too. A shared type widened by one ticket can break another's fixtures; plan a separate `test(...)` commit after the rebase.
+- **Integration check (the point of the whole design):** replace the stubs with the real thing and run stage 7 on a scratch integration worktree (or, across repos, with both services running locally) that applies all diffs, before the first merge. For UI that renders what another ticket makes clickable, this includes a live browser check. Stubs prove each side matches the contract; only this check proves the contract matched reality. Mismatches go back as a contract change (step 3), not as a quiet patch on one side.
+- For cross-repo work, merge order across repos follows the deploy order (producer deployed before consumer calls it, or the consumer tolerant of the old shape); state that order in the epic before merging.
+
+### 5. Board and status
+
+With a board, each ticket moves independently. Without one, update the run file's units table instead. 
+Each ticket still moves through its own stages independently. Add `contract-ready` to the epic when step 2 is approved, and `integrated` when the integration check passes; the epic moves to `done` only after that check, not when the last ticket merges. Report in the status line: contract version, tickets running, change requests so far.
+
+### Cost note
+
+Not measured yet. Expect the contract stage to cost one design-sized agent round or an inline orchestrator pass, and each fan-out ticket to cost what it would alone, plus a stub and a contract test each; the saving is wall-clock time, not tokens. Record real numbers in the first run notes.
 
 ## Resuming a pipeline
+
+For a ticketless run, start from `<runsDir>/<slug>/run.md` (or the single repo's `.claude/runs/<slug>/run.md`) instead of an epic card, then verify each unit against git (branches, worktrees, PRs) exactly as in step 3 below.
 
 When the user asks to resume or check status of a pipeline already in progress (see "When to invoke"), and a task board is configured, don't start a fresh breakdown — reconstruct where things actually are:
 
@@ -304,6 +371,7 @@ Open questions, to measure on a real run before turning any of this into a rule:
 
 - [ ] Build specialist agents/skills for UX/UI design, technical design, coding, test, deploy, monitor stages — as-needed, once general-purpose proves insufficient for a given stage on real work, not speculatively
 - [x] Decide the concrete shape of `.claude/pipeline.json` — see "Schema" under Config (2026-09-28). `lists` renamed to `stageMap`, with `lists` still read as a legacy alias. Per-ticket and per-branch overrides left out: no trial needed them
+- [ ] Run contract-first parallel work (see "Running sub-tickets in parallel") on a real multi-ticket or multi-repo epic; measure contract-change requests per seam, integration-check failures and token cost, and adjust the "when to parallelise" test
 - [ ] Validate the resume algorithm on a real interrupted pipeline (not yet exercised). The `virtual-agent-office` close-out resumed from a handoff doc plus git state, not by reading the board
 - [ ] Run auto mode on a real project. It has only been exercised in dry runs; every real trial so far used manual mode
 - [ ] Exercise stages 8–9 on `virtual-agent-office`. Its deploy target is `local`, so deploy and monitor haven't run there; [001.7] deploy via CLI would be the first real test
