@@ -1,6 +1,6 @@
 ---
 name: code-walkthrough
-description: Walk the user through code that an agent (Claude) just implemented, so a human reviewer can understand a large change without reading every file. Organises the explanation by runtime flow (entry → decision → side effects → failure path), not by file; every step points to file:line, says why the logic is shaped that way, and separates what was verified (commands run) from what was only reasoned. Trigger on /code-walkthrough, or when the user asks to be walked through / explained the changes the agent made ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff").
+description: Walk the user through code that an agent (Claude) just implemented, so a human reviewer can understand a large change without reading every file. Two modes: quick (annotate the diff, one line per hunk saying what it does) and deep (flow-ordered chapters, then line-by-line through a chosen group of code). Deep organises the explanation by runtime flow (entry → decision → side effects → failure path), not by file; every step points to file:line, says why the logic is shaped that way, and separates what was verified (commands run) from what was only reasoned. Trigger on /code-walkthrough, or when the user asks to be walked through / explained the changes the agent made ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff"). Mode words: quick / สั้น / อธิบาย diff → quick; deep / ละเอียด / ไล่ทีละบรรทัด → deep.
 ---
 
 # Code walkthrough
@@ -10,7 +10,7 @@ The reviewer did not write this code and the change is too big to read cold. You
 
 ## Rules
 
-- **Flow, not file list.** Tell it the way a request travels: entry point → decision → side effects → failure/rollback.
+- **Deep mode: flow, not file list.** (Quick mode is the exception: it follows the diff, file by file.) Tell it the way a request travels: entry point → decision → side effects → failure/rollback.
   A file appears where the flow reaches it, never as its own chapter.
 - **Re-read the code before explaining it.** Never narrate from memory of what you wrote; the file may have changed
   (reviews, merges, formatter). Open each file and take `file:line` from the current text.
@@ -22,7 +22,38 @@ The reviewer did not write this code and the change is too big to read cold. You
   and what would prove it (e.g. "needs Postgres").
 - **Match the user's language** for prose (Thai if they write Thai); keep identifiers, paths and code in English.
 
-## Workflow
+## Modes
+
+Pick the mode from the request; if it names none, use **quick** and offer deep at the end.
+
+| Mode | Answers | Output |
+| --- | --- | --- |
+| **quick** | "What does each part of this diff do?" | The diff annotated: per file, per hunk, one line of what it does. |
+| **deep** | "How does this group of code work, line by line?" | Flow map and chapters (the Workflow below), then a line-by-line pass over each group the reviewer picks. |
+
+Both modes share the Rules. Fix the change set (Workflow step 1) first in either.
+
+### Quick mode
+
+1. Fix the change set (step 1), then read the diff hunk by hunk from the current files (`git diff`), not from memory.
+2. Group hunks by file, in the order a reviewer should read them. For each hunk write one line: `file:line-range — what it does`, plus a short why only when the intent is not obvious from the code.
+3. Mark what deserves a human eye (risky logic, a deviation from the ticket, anything unproven) with a single flag, not a paragraph.
+4. Close with 2-3 lines: how many files / hunks, what was excluded, and an offer: "deep on <group>?" naming the group most worth it.
+
+No flow map, no chapters, no ledger. Keep it to what fits on a screen or two; a hunk that needs more than a line is a candidate for deep mode.
+
+### Deep mode
+
+Run the Workflow below (flow map, chapters, decisions, verification). Then, for each group of code the reviewer picks (or the 1-3 riskiest if they name none):
+
+- Name the group (a function, a module, a handler) and say what it is for in one sentence.
+- Go **line by line, or by the smallest run of lines that does one thing**: `file:line` — what this line does — why it is there. Quote the line or a short fragment; do not paste the whole block first.
+- Follow the data: for each variable or branch say where it comes from and what it can be, including the empty / null / error cases.
+- End the group with what a reader should now believe about it, and which test or command shows it (or that nothing does).
+
+Lines that are plain boilerplate (imports, trivial getters) are grouped in one line, not narrated.
+
+## Workflow (deep mode)
 
 1. **Fix the change set.** Use git, not memory: `git status --short`, `git diff HEAD --stat` (staged + unstaged), untracked
    files. Separate: feature changes / merge commits / user's local edits / generated files. Report the count (files, +/-).
@@ -48,6 +79,6 @@ The reviewer did not write this code and the change is too big to read cold. You
 ## Style
 
 - Terminal markdown. Short paragraphs, tables for mappings, code fences only for excerpts you actually need.
-- No restating the diff line by line; no praise; no hedging about things you verified.
+- No restating the diff line by line, except in the line-by-line pass of deep mode, where it is the point; no praise; no hedging about things you verified.
 - If something looks wrong while re-reading, say so and fix or flag it — the walkthrough is also a last self-review.
 - Do not publish the walkthrough anywhere unless the user asks; it is for the person who asked for it.
