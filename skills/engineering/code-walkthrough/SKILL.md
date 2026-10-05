@@ -76,6 +76,16 @@ Lines that are plain boilerplate (imports, trivial getters) are grouped in one l
 9. **Offer to go deeper.** Large changes: finish the map + chapters, then ask which part to zoom into rather than
    dumping every file.
 
+## Review of a branch (VAO drawer)
+
+When the user asks for a review of branch X against Y, or the output is for the VAO drawer, write the walkthrough (either mode) as a section the drawer can parse, and no tables (it cannot render them):
+
+- Put it under a `## Walkthrough` heading. The first line is ``Compare: `base...head` `` (Y is the base, X the head; three dots, backticks, no spaces inside).
+- One `###` heading per step or chapter, in the order a reviewer should read.
+- Under each heading, one bullet per note: ``- `path:start-end` — text``. A single line is ``- `path:12` — text``; a whole file (a deleted file too) is ``- `path` — text``. Lines are those of the head version. The separator is a dash with a space on each side; a long note may continue on following lines indented by two spaces.
+- Anything else (flow map, verified vs reasoned, decisions) goes as plain lines or bullets without a code-span path; the parser keeps it as unparsed lines.
+- Prose in the user's language, as in Rules.
+
 ## Style
 
 - Terminal markdown. Short paragraphs, tables for mappings, code fences only for excerpts you actually need.
