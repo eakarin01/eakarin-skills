@@ -2,6 +2,7 @@
   "name": "eakarin-skills",
   "skills": [
     "./skills/engineering/bump-release",
+    "./skills/engineering/code-walkthrough",
     "./skills/engineering/commit",
     "./skills/engineering/pagination-join-safety",
     "./skills/productivity/ticket-card"
