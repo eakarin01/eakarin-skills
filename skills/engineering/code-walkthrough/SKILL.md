@@ -1,6 +1,6 @@
 ---
 name: code-walkthrough
-description: Walk the user through code that an agent (Claude) just implemented, so a human reviewer can understand a large change without reading every file. Two modes: quick (annotate the diff, one line per hunk saying what it does) and deep (flow-ordered chapters, then line-by-line through a chosen group of code). Deep organises the explanation by runtime flow (entry → decision → side effects → failure path), not by file; every step points to file:line, says why the logic is shaped that way, and separates what was verified (commands run) from what was only reasoned. Trigger on /code-walkthrough, or when the user asks to be walked through / explained the changes the agent made ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff"). Mode words: quick / สั้น / อธิบาย diff → quick; deep / ละเอียด / ไล่ทีละบรรทัด → deep.
+description: Walk the user through code that an agent (Claude) just implemented, so a human reviewer can understand a large change without reading every file. Two modes: quick (annotate the diff, one line per hunk saying what it does) and deep (flow-ordered chapters, then line-by-line through a chosen group of code). Deep organises the explanation by runtime flow (entry → decision → side effects → failure path), not by file; every step points to file:line, says why the logic is shaped that way, and separates what was verified (commands run) from what was only reasoned. Trigger on /code-walkthrough, or when the user asks to be walked through / explained the changes the agent made ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff"), or asks to review a PR or a branch pair ("ช่วย review PR feat/x -> main", "review X against Y"). Mode words: quick / สั้น / อธิบาย diff → quick; deep / ละเอียด / ไล่ทีละบรรทัด → deep.
 ---
 
 # Code walkthrough
@@ -76,19 +76,30 @@ Lines that are plain boilerplate (imports, trivial getters) are grouped in one l
 9. **Offer to go deeper.** Large changes: finish the map + chapters, then ask which part to zoom into rather than
    dumping every file.
 
-## Review of a branch (VAO drawer)
+## Reviewing a PR or branch (VAO)
 
-When the user asks for a review of branch X against Y, or the output is for the VAO drawer, write the walkthrough (either mode) as a section the drawer can parse, and no tables (it cannot render them):
+Use this when the user asks for a review of a PR or a branch pair, for example "ช่วย review PR feat/x -> main", "review feat/x into main", "review branch X against Y", or when the output is for the VAO drawer. It is deep or quick mode with two additions: the reviewer's findings, and an output the VAO review page can open (file list on the left, the diff with your notes under the lines they refer to).
 
-- Put it under a `## Walkthrough` heading. The first line is ``Compare: `base...head` `` (Y is the base, X the head; three dots, backticks, no spaces inside).
+**Direction.** `X -> Y` is how a PR reads: X is the head (the branch with the change), Y is the base. The compare line is ``Compare: `Y...X` ``, base first. If the user names only X, the base is the repository's default branch; say which you assumed.
+
+**Before writing.**
+- Work in the repository the PR is about (the VAO page asks the collector for the diff in the folder where this session started, so the session must be started there). If you are somewhere else, say so and stop rather than guess.
+- Make the refs resolve locally: `git fetch` first when the network is allowed (skip it when it is not and the refs already resolve), and use `origin/<branch>` when there is no local branch. A base or head may also be a commit hash or `HEAD~3`: check each with `git rev-parse --verify`. The names in the compare line must work in `git diff <base>...<head>` exactly as written.
+- Read the change from git (`git diff --stat <base>...<head>`, then the hunks), not from memory; this replaces the dirty-tree commands of step 1 for a branch pair. The three-dot diff already leaves out what the base brought into the head through a merge: say in one line if the head contains merge commits. Exclude generated files and say so. Do not check the branch out unless the user asks.
+
+**What to write** (either mode, in the user's language, no tables because the drawer cannot render them). The final message is: a short verdict first (ready, ready with changes, or not ready, and the one or two reasons), then the section below. Findings are notes like the others, marked at the start of the text: `**Issue:**` (should change), `**Question:**` (needs the author's answer), `**Risk:**` (works, but fragile or unproven), `**OK:**` only for a decision worth confirming. Say how you know (read the code, ran a test, reasoned) in the note.
+
+- Put it under a `## Walkthrough` heading. The first line under it is ``Compare: `base...head` `` (three dots, backticks, no spaces inside). A plain scope line (files, what was excluded, what was not run) may follow it before the first step. The verdict goes above the heading.
 - One `###` heading per step or chapter, in the order a reviewer should read.
 - Under each heading, one bullet per note: ``- `path:start-end` — text``. A single line is ``- `path:12` — text``; a whole file (a deleted file too) is ``- `path` — text``. Lines are those of the head version. The separator is a dash with a space on each side; a long note may continue on following lines indented by two spaces.
-- Anything else (flow map, verified vs reasoned, decisions) goes as plain lines or bullets without a code-span path; the parser keeps it as unparsed lines.
-- Prose in the user's language, as in Rules.
+- Anything else (flow map, verified vs reasoned, decisions, the suggested review order, the offer to go deeper) goes as plain sentences or bullets that do not start with a code-span path (that would be read as a note); the parser keeps them as unparsed lines. The review page does not show unparsed lines yet, so anything the reader must see on that page belongs in a note.
+- Quick mode keeps its closing offer to go deeper as one plain line.
+
+**Size.** The page keeps at most 16,000 characters of the final message (a message of 280 characters or fewer is kept as a snippet only). Keep the whole message well under that: for a large PR, annotate the files that matter (risky logic, public contracts, anything unproven) and list the rest in one line, rather than one note per hunk.
 
 ## Style
 
-- Terminal markdown. Short paragraphs, tables for mappings, code fences only for excerpts you actually need.
+- Terminal markdown. Short paragraphs, tables for mappings (not in a walkthrough for the VAO drawer), code fences only for excerpts you actually need.
 - No restating the diff line by line, except in the line-by-line pass of deep mode, where it is the point; no praise; no hedging about things you verified.
 - If something looks wrong while re-reading, say so and fix or flag it — the walkthrough is also a last self-review.
 - Do not publish the walkthrough anywhere unless the user asks; it is for the person who asked for it.
