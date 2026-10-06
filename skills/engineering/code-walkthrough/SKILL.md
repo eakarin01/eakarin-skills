@@ -82,6 +82,12 @@ Use this when the user asks for a review of a PR or a branch pair, for example "
 
 **Direction.** `X -> Y` is how a PR reads: X is the head (the branch with the change), Y is the base. The compare line is ``Compare: `Y...X` ``, base first. If the user names only X, the base is the repository's default branch; say which you assumed.
 
+**Work that is not committed yet.** When the user asks to review what is still staged or unstaged before a commit ("ช่วย review งานที่ยังไม่ commit", "review ที่ staged อยู่", "review unstaged", "review before I commit"), there is no head branch: the head is a reserved name and the compare line is one of
+- ``Compare: `HEAD...@staged` `` for what is in the index ("ที่ staged"),
+- ``Compare: `HEAD...@unstaged` `` for edits not yet added, plus new files that git does not track yet ("ที่ยัง unstaged"),
+- ``Compare: `HEAD...@worktree` `` for both together, plus new untracked files ("ทั้งหมดที่ยังไม่ commit"; use this when the user does not say which).
+The base is `HEAD`, or the branch the work will be merged into (``origin/main...@worktree`` shows the whole branch plus the uncommitted edits). Read the change with `git diff --cached`, `git diff` or `git diff HEAD`, and list new files with `git status --short` (untracked files are not in `git diff`); read their content directly. No `git fetch` is needed. The page reads the disk live, so tell the user in one line that notes refer to the files as they are now and move if the files are edited afterwards, and that `.env`-like files are shown without their content.
+
 **Before writing.**
 - Work in the repository the PR is about (the VAO page asks the collector for the diff in the folder where this session started, so the session must be started there). If you are somewhere else, say so and stop rather than guess.
 - Make the refs resolve locally: `git fetch` first when the network is allowed (skip it when it is not and the refs already resolve), and use `origin/<branch>` when there is no local branch. A base or head may also be a commit hash or `HEAD~3`: check each with `git rev-parse --verify`. The names in the compare line must work in `git diff <base>...<head>` exactly as written.
