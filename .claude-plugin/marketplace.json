@@ -1,0 +1,14 @@
+{
+  "name": "eakarin-skills",
+  "owner": {
+    "name": "Eakarin"
+  },
+  "description": "Eakarin's Claude Code skills, published as one plugin.",
+  "plugins": [
+    {
+      "name": "eakarin-skills",
+      "source": "./",
+      "description": "Engineering and productivity skills: sdlc-manager, ticket-card, code-walkthrough, commit, bump-release, pagination-join-safety."
+    }
+  ]
+}

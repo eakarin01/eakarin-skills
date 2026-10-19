@@ -17,6 +17,14 @@ Each skill is its own directory containing a `SKILL.md` (with YAML frontmatter â
 
 ## Install
 
+As a Claude Code plugin (all skills under `engineering/` and `productivity/`, listed in `.claude-plugin/plugin.json`):
+
+```bash
+/plugin install eakarin-skills --marketplace eakarin01/eakarin-skills
+```
+
+The repo is private, so this needs read access to `eakarin01/eakarin-skills` on GitHub.
+
 For my own dev loop â€” symlink every shippable and `personal/` skill into `~/.claude/skills/` (`in-progress/` and `deprecated/` are skipped):
 
 ```bash
