@@ -17,7 +17,7 @@ Each skill is its own directory containing a `SKILL.md` (with YAML frontmatter �
 
 ## Install
 
-For my own dev loop — symlink every shippable skill into `~/.claude/skills/`:
+For my own dev loop — symlink every shippable and `personal/` skill into `~/.claude/skills/` (`in-progress/` and `deprecated/` are skipped):
 
 ```bash
 ./scripts/link-skills.sh
