@@ -5,6 +5,7 @@
     "./skills/engineering/code-walkthrough",
     "./skills/engineering/commit",
     "./skills/engineering/pagination-join-safety",
+    "./skills/engineering/sdlc-manager",
     "./skills/productivity/ticket-card"
   ]
 }
