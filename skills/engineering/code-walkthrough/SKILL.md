@@ -1,6 +1,6 @@
 ---
 name: code-walkthrough
-description: Walk the user through a change (code an agent just wrote, a PR or branch pair, or work that is still staged or unstaged), so a human reviewer can understand and review it without reading every file. Every walkthrough or review ends with ONE message in the VAO format (verdict, `## Walkthrough`, a `Compare:` line, notes pinned to file:line) that the virtual-agent-office review page opens as a file list plus diff; plain terminal markdown only when the user asks for it by name. Two modes: quick (one line per hunk saying what it does) and deep (flow-ordered steps, then line-by-line through a chosen group of code, with findings). Deep follows the runtime flow (entry → decision → side effects → failure path), not the file list; every note points to file:line, says why the logic is shaped that way, and separates what was verified (commands run) from what was only reasoned. Trigger on /code-walkthrough, or when the user asks to be walked through or to have a change explained ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff", "walkthrough change บน working tree"), or asks to review code, a PR, a branch pair or uncommitted work ("จะ review code ด้วย", "ช่วย review PR feat/x -> main", "review X against Y", "review ก่อน commit"). Mode words: quick / สั้น / อธิบาย diff → quick; deep / ละเอียด / ไล่ทีละบรรทัด → deep.
+description: Walk a reviewer through a change (code an agent just wrote, a PR or branch pair, or staged/unstaged work) in the order it runs, ending with one VAO-format message (verdict, `## Walkthrough`, `Compare:` line, notes pinned to file:line) for the virtual-agent-office review page. Trigger on /code-walkthrough, or when the user asks to be walked through or to have a change explained ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff", "walkthrough change บน working tree"), or asks to review code, a PR, a branch pair or uncommitted work ("จะ review code ด้วย", "ช่วย review PR feat/x -> main", "review X against Y", "review ก่อน commit"). Modes: quick / สั้น / อธิบาย diff (one line per hunk, default); deep / ละเอียด / ไล่ทีละบรรทัด (flow order, line by line, findings).
 ---
 
 # Code walkthrough
@@ -88,9 +88,8 @@ The page shows the **last message of your turn** and replaces anything shown bef
 
 ## Rules
 
-- **Deep mode: flow, not file list.** (Quick mode is the exception: it follows the diff, file by file.) Tell it the way a
-  request travels: entry point → decision → side effects → failure/rollback. A file appears where the flow reaches it,
-  never as its own step.
+- **Deep mode follows the flow, not the file list** (entry point → decision → side effects → failure/rollback; details in
+  `references/deep-mode.md`). Quick mode is the exception: it follows the diff, file by file.
 - **Re-read the code before explaining it.** Never narrate from memory of what you wrote; the file may have changed
   (reviews, merges, formatter). Open each file and take `file:line` from the current text.
 - **Read the change from git, not from memory.** `git diff --stat`, then the hunks, of exactly the range in the
@@ -116,7 +115,8 @@ Pick the mode from the request; if it names none, use **quick** and offer deep i
 | **quick** | "What does each part of this diff do?" | One note per hunk, grouped under a `###` step per area, in the order a reviewer should read them. |
 | **deep** | "How does this group of code work, line by line, and is it right?" | Steps follow the flow; line-by-line notes for the groups the reviewer picks; findings pinned to their lines. |
 
-Both modes share the Rules and the output above. Fix the change set (step 1 of the deep workflow) first in either.
+Both modes share the Rules and the output above. Fix the change set first in either:
+`git status --short`, then the diff of the range in the `Compare:` line; separate feature changes from merge commits, the user's local edits and generated files.
 
 ### Quick mode
 
@@ -132,35 +132,10 @@ No flow map, no ledger. Keep it short; a hunk that needs more than a line is a c
 
 ### Deep mode
 
-Follow the workflow below, but write it in the VAO format:
-
-- The **flow map** is one or two plain sentences under the scope line (entry → decision → side effects → failure path).
-- Every **chapter** is a `###` step in execution order; what happens and why are notes pinned to the lines that do it.
-- The **line-by-line pass** for each group the reviewer picks (or the 1-3 riskiest): a `###` step named for the group,
-  then notes of the form ``- `file:line` — what this line does — why it is there``, by the smallest run of lines that
-  does one thing. Follow the data: where each variable or branch comes from and what it can be, including the empty,
-  null and error cases. Boilerplate (imports, trivial getters) is one note for the lot.
-- The **decisions table** becomes `**OK:**` or `**Risk:**` notes on the lines where the decision lives (who decided,
-  how to change it). The **verification ledger** becomes the "how you know" part of each note, and one `**Risk:**` note
-  per thing that could not be run ("not run: needs Postgres").
-- Close the group with what a reader should now believe about it: a note on its last line.
-
-## Workflow (deep mode)
-
-1. **Fix the change set.** Use git, not memory: `git status --short`, then the diff of the range you chose above.
-   Separate: feature changes / merge commits / the user's local edits / generated files. Report the count (files, +/-) in
-   the scope line.
-2. **Find the entry points** the change hangs off (controller, consumer, cron). Read them and follow the calls until the
-   change set is exhausted. Collect `file:line` as you go.
-3. **Map first.** The flow in your head (and in one plain sentence in the message) before any note.
-4. **Write the steps, one per flow or decision,** in execution order. In each: what happens, why it is shaped this way and
-   the rejected alternative if there was one, the edge and failure behaviour (what is rolled back, what is left, what the
-   caller sees), and the tests that pin it (spec file and case names), all as notes on the lines involved.
-5. **Data and contract changes together,** in one step: migrations, entity columns, API request/response shape, events,
-   config. These are what other teams feel first.
-6. **Suggested review order:** one plain sentence naming 5-8 files, and the 2-3 places where a human eye is most valuable.
-7. **Offer to go deeper:** large changes: finish the steps, then say in one plain line which part you would zoom into
-   rather than dumping every file. The follow-up is a complete message (see above).
+**Read [`references/deep-mode.md`](references/deep-mode.md) before writing a deep walkthrough**: the flow map, chapters
+in execution order, the line-by-line pass for the groups the reviewer picks, decisions and the verification ledger as
+`**OK:**`/`**Risk:**` notes, and the seven-step workflow (change set → entry points → map → steps → data and contract
+changes → review order → offer to go deeper).
 
 ## Style
 
