@@ -1,6 +1,7 @@
 ---
 name: code-walkthrough
-description: Walk a reviewer through a change (code an agent just wrote, a PR or branch pair, or staged/unstaged work) in the order it runs, ending with one VAO-format message (verdict, `## Walkthrough`, `Compare:` line, notes pinned to file:line) for the virtual-agent-office review page. Trigger on /code-walkthrough, or when the user asks to be walked through or to have a change explained ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff", "walkthrough change บน working tree"), or asks to review code, a PR, a branch pair or uncommitted work ("จะ review code ด้วย", "ช่วย review PR feat/x -> main", "review X against Y", "review ก่อน commit"). Modes: quick / สั้น / อธิบาย diff (one line per hunk, default); deep / ละเอียด / ไล่ทีละบรรทัด (flow order, line by line, findings).
+description: >-
+  Walk a reviewer through a change (code an agent just wrote, a PR or branch pair, or staged/unstaged work) in the order it runs, ending with one VAO-format message (verdict, `## Walkthrough`, `Compare:` line, notes pinned to file:line) for the virtual-agent-office review page. Trigger on /code-walkthrough, or when the user asks to be walked through or to have a change explained ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff", "walkthrough change บน working tree"), or asks to review code, a PR, a branch pair or uncommitted work ("จะ review code ด้วย", "ช่วย review PR feat/x -> main", "review X against Y", "review ก่อน commit"). Modes: quick / สั้น / อธิบาย diff (one line per hunk, default); deep / ละเอียด / ไล่ทีละบรรทัด (flow order, line by line, findings).
 ---
 
 # Code walkthrough

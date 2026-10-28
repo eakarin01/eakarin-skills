@@ -1,6 +1,7 @@
 ---
 name: commit
-description: Create a git commit in this user's conventional-commit style — `type(TICKET): description :whale:`, scope taken from the Jira ticket in the branch name, commitlint-conventional types, always suffixed with the `:whale:` emoji, no Co-Authored-By line. Trigger on /commit or when the user says "commit this", "commit these changes", "make a commit", "git commit".
+description: >-
+  Create a git commit in this user's conventional-commit style — `type(TICKET): description :whale:`, scope taken from the Jira ticket in the branch name, commitlint-conventional types, always suffixed with the `:whale:` emoji, no Co-Authored-By line. Trigger on /commit or when the user says "commit this", "commit these changes", "make a commit", "git commit".
 ---
 
 # Commit

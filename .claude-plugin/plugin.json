@@ -1,6 +1,6 @@
 {
   "name": "eakarin-skills",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Engineering and productivity skills: sdlc-manager, ticket-card, code-walkthrough, commit, bump-release, pagination-join-safety.",
   "author": {
     "name": "Eakarin"
