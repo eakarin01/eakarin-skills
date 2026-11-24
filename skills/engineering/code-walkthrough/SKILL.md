@@ -1,153 +1,82 @@
 ---
 name: code-walkthrough
 description: >-
-  Walk a reviewer through a change (code an agent just wrote, a PR or branch pair, or staged/unstaged work) in the order it runs, ending with one VAO-format message (verdict, `## Walkthrough`, `Compare:` line, notes pinned to file:line) for the virtual-agent-office review page. Trigger on /code-walkthrough, or when the user asks to be walked through or to have a change explained ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff", "walkthrough change บน working tree"), or asks to review code, a PR, a branch pair or uncommitted work ("จะ review code ด้วย", "ช่วย review PR feat/x -> main", "review X against Y", "review ก่อน commit"). Modes: quick / สั้น / อธิบาย diff (one line per hunk, default); deep / ละเอียด / ไล่ทีละบรรทัด (flow order, line by line, findings).
+  Walk a reviewer through a change (code an agent just wrote, a PR or branch pair, or staged/unstaged work) in the order it runs, ending with one VAO-format message for the virtual-agent-office review page. Trigger on /code-walkthrough, or when the user asks to be walked through or to have a change explained ("พาผม walkthrough", "อธิบาย code ที่แก้", "ช่วยเล่า flow", "change เยอะ review ไม่ไหว", "walk me through the diff"), or asks to review code, a PR, a branch pair or uncommitted work ("จะ review code ด้วย", "ช่วย review PR feat/x -> main", "review X against Y", "review ก่อน commit"). Modes: quick (default) / deep (ละเอียด, ไล่ทีละบรรทัด).
 ---
 
 # Code walkthrough
 
-The reviewer did not write this code and the change is too big to read cold. Your job is to make the code
-*readable in the order it runs*, and to be honest about what you decided on their behalf.
+The reviewer did not write this code and the change is too big to read cold. Make it readable in the order it runs,
+and be honest about what you decided on their behalf.
 
-## The output is always the VAO format
+## Output: always one VAO message
 
-Every walkthrough and every review, quick or deep, ends with **one message in the VAO format** described below. The
-user reads it on the virtual-agent-office review page: the changed files on the left, the diff on the right, your notes
-under the lines they refer to. This is the default whatever the words of the request are ("walkthrough", "review", "ขอแบบ
-ละเอียด"): do not wait for "review", "PR" or "VAO" to appear.
+Every walkthrough or review, quick or deep, ends with **one message in the format below**. It is shown on the VAO review
+page: files left, diff right, your notes under their lines. Use terminal markdown only when the user's current request
+asks for it by name ("terminal format", "ไม่ต้องขึ้น VAO"), never because of a memory or handoff note; then say in one
+line it will not reach the page. The page shows commit ranges and staged/unstaged/working-tree changes: a note saying
+otherwise is out of date.
 
-- **Terminal markdown only on request.** Write terminal-style markdown (headings of your choice, tables) only when the
-  user asks for it by name ("in the terminal", "terminal format", "ไม่ต้องขึ้น VAO"). The user's current request is the
-  only thing that can ask for it: a handoff note, a memory or an earlier session saying "terminal format" does not. When
-  you do write terminal markdown, say in one line that it will not appear on the review page.
-- **This skill wins over old notes about what the page can show.** The review page opens commit ranges (since
-  2026-10-05) and uncommitted work, staged, unstaged and the whole working tree (since 2026-10-06). A memory or handoff
-  that says it cannot show uncommitted work is out of date. If you doubt it, try: the page, not a note, is the test.
-- **Tables are for this file, not for your message.** The page cannot render them.
+### `Compare:` line
 
-### Choose the `Compare:` line from the scope of the work
+Look first (`git status --short`, `git log --oneline -5`). "X -> Y" or "X against Y" means head X, base Y.
 
-Look first (`git status --short`, `git log --oneline -5`), then pick the one that matches what the user wants reviewed.
-`X -> Y` as in "review PR X -> Y" reads like a PR: X is the head, Y the base.
+- PR or branch: `` `Y...X` `` (only X named: base = default branch, say so)
+- Commits made: `` `HEAD~1...HEAD` ``, `` `abc123...HEAD` ``
+- Staged only: `` `HEAD...@staged` ``. Unstaged plus untracked: `` `HEAD...@unstaged` ``
+- All uncommitted (default for "changes on the working tree"): `` `HEAD...@worktree` ``
+- Branch plus uncommitted: `` `origin/main...@worktree` `` (any merge base)
 
-| What is reviewed | `Compare:` |
-| --- | --- |
-| A PR or branch, "X -> Y" or "X against Y" | `` `Y...X` `` (base first; if only X is named, the base is the default branch, and say so) |
-| Commits already made, "the last commit", "since abc123" | `` `HEAD~1...HEAD` ``, `` `abc123...HEAD` `` |
-| Only what is staged ("ที่ staged") | `` `HEAD...@staged` `` |
-| Only edits not yet added, plus new untracked files ("ที่ยัง unstaged") | `` `HEAD...@unstaged` `` |
-| Everything not committed, staged and unstaged, plus new files (the default for "the changes on the working tree" when the user does not say which) | `` `HEAD...@worktree` `` |
-| The whole branch plus uncommitted edits | `` `origin/main...@worktree` `` (any base the work will merge into) |
+Refs must work in `git diff <base>...<head>`: check each with `git rev-parse --verify` (`git fetch` first if a branch is
+only on the remote). Do not check anything out.
 
-Refs must work exactly as written in `git diff <base>...<head>` (a branch, `origin/<branch>`, a commit hash, `HEAD~3`):
-check each with `git rev-parse --verify`, and `git fetch` first when the network is allowed and a branch is only on the
-remote. Do not check a branch out unless asked.
+### Message shape
 
-### Shape of the message
+1. **Verdict**, plain text above the heading: ready / ready with changes / not ready, with the one or two reasons. For an
+   explanation only: one line on what the change does.
+2. **`## Walkthrough`**; its first line is ``Compare: `base...head` ``. One plain scope line may follow (files, +/-, what
+   was excluded, what was not run). For uncommitted work add that notes follow the files as they are now and that
+   `.env`-like files show no content.
+3. **One `###` heading per step**, in reading order.
+4. **One bullet per note:** ``- `path:start-end` — text``, ``- `path:12` — text``, or ``- `path` — text`` for a whole
+   file. Head-version lines, ` — ` as separator; a long note continues on lines indented two spaces.
+5. **Findings:** the label is the **first word after the dash**:
+   ``- `src/seat.ts:12` — **Risk:** the fallback hides a missing rule (read the code)``.
+   `**Issue:**` should change · `**Question:**` needs the author · `**Risk:**` fragile or unproven · `**OK:**` a decision
+   worth confirming. The page files a note by this label and shows its icon, so:
+   - A label before the path, after a description, or on the indented line is not read. Describing the line too?
+     Finding first, or two notes on the same path.
+   - Every finding gets a label; "low risk" or "suggest …" as plain text is lost.
+   - Say how you know: read the code, ran a test, or reasoned.
+6. Anything else (flow map, review order, offer to go deeper) is plain text or a bullet not starting with a code-span
+   path. The page does not show it, so what must be seen goes in a note.
 
-1. **Verdict (above the heading).** For a review: ready, ready with changes, or not ready, with the one or two reasons.
-   For an explanation with no review asked: one line saying what the change does. Plain text, short.
-2. **`## Walkthrough`**, and the **first line under it** is ``Compare: `base...head` `` (three dots, backticks, no spaces
-   inside). One plain scope line may follow it (files and +/-, what was excluded, what was not run). For uncommitted work
-   say in one line that notes refer to the files as they are now and move if the files are edited afterwards, and that
-   `.env`-like files are shown without their content.
-3. **One `###` heading per step**, in the order a reviewer should read.
-4. **Under each heading, one bullet per note:** ``- `path:start-end` — text``. One line is ``- `path:12` — text``; a whole
-   file (a deleted one too) is ``- `path` — text``. Lines are those of the head version. The separator is a dash with a
-   space on each side; a long note may continue on following lines indented by two spaces. Use only this shape for
-   notes.
-5. **Findings are notes.** The bullet still starts with the path; the label opens the text after the dash:
-   ``- `src/seat.ts:12` — **Risk:** the fallback hides a missing rule (read the code, not run)``. A bullet that starts
-   with the label (``- **Risk:** `src/seat.ts:12` …``) is not a note: the page ignores it. Labels: `**Issue:**` (should
-   change), `**Question:**` (needs the author's answer), `**Risk:**` (works but fragile or unproven), `**OK:**` (a
-   decision worth confirming). Say how you know: read the code, ran a test, or reasoned. A finding that continues on
-   its own line is indented by two spaces, so it stays part of the same note.
-   - **The label is the first word after the dash.** The page files a note under its label's tab and puts the icon by
-     it. A label after a description (``— cron runs at 08:00. **Risk:** …``) or on the indented line below it is filed
-     as a plain note. When a line needs both a description and a finding, put the finding first, or write two notes
-     on the same path.
-   - **Every finding has a label.** "Low risk", "suggest …" or "has a trailing space" written as plain text is a finding
-     without one: it is filed as a plain note and the reviewer misses it. Pick the label that fits.
-6. **Everything else** (the flow map, the suggested review order, the offer to go deeper) is a plain sentence or a
-   bullet that does not start with a code-span path (that would be read as a note). The page does not show such lines
-   yet, so anything the reader must see on the page belongs in a note.
+**The last message wins.** The page shows only the last message of your turn: make every tool call before it. A
+follow-up ("zoom into X") is a complete message with the same `Compare:` line, not a delta. Max 16,000 characters
+(280 or fewer is kept as a snippet only): annotate what matters, list the rest in one plain line.
 
-### The last message wins, and it must be this one
-
-The page shows the **last message of your turn** and replaces anything shown before it.
-- Do every tool call (running tests, editing files or memory) **before** you write the walkthrough. If something has to
-  happen after it, post the whole walkthrough again as the very last message.
-- A later walkthrough replaces an earlier one, so a follow-up ("zoom into group X") is a **complete** message with the
-  same `Compare:` line, not a delta: expand the group asked for and keep the other notes short.
-- The page keeps at most **16,000 characters** (a message of 280 characters or fewer is kept as a snippet only). Stay well
-  under that: annotate the files that matter (risky logic, public contracts, anything unproven) and list the rest in one
-  plain line, rather than one note per hunk.
-
-### Check before you send
-
-- [ ] `## Walkthrough` is there and the ``Compare:`` line is the first line under it, with refs that resolve.
-- [ ] No table anywhere in the message.
-- [ ] Every note starts with ``- `path`` or ``- `path:line` — `` (a finding's label is the first word after the dash, never before the path or after a description; every finding has one), and the paths and lines come from the current files.
-- [ ] Under 16,000 characters; this is the last message of the turn (no tool call after it).
-- [ ] The scope matches the request (a PR is not reviewed as a working tree, or the other way round).
-- [ ] You are in the repository the change belongs to (the page asks for the diff in the folder where this session
-      started). If you are somewhere else, say so and stop rather than guess.
+**Check before sending:** `Compare:` is first under `## Walkthrough` and its refs resolve · no tables · every note starts
+``- `path`` with the label right after the dash · under 16k chars, no tool call after · scope matches the request · you
+are in the repo the change belongs to (otherwise say so and stop).
 
 ## Rules
 
-- **Deep mode follows the flow, not the file list** (entry point → decision → side effects → failure/rollback; details in
-  `references/deep-mode.md`). Quick mode is the exception: it follows the diff, file by file.
-- **Re-read the code before explaining it.** Never narrate from memory of what you wrote; the file may have changed
-  (reviews, merges, formatter). Open each file and take `file:line` from the current text.
-- **Read the change from git, not from memory.** `git diff --stat`, then the hunks, of exactly the range in the
-  `Compare:` line; for uncommitted work `git diff --cached`, `git diff` or `git diff HEAD`, and `git status --short` for
-  new files (untracked files are not in `git diff`: read their content directly).
-- **Scope = the change set only.** Exclude merge commits, upstream code and the user's own local edits. Say what you
-  excluded; if the head contains merge commits, say so in one line (the three-dot diff already leaves out what the base
-  brought in).
-- **Every step carries its "why".** Not "this calls X" but "this calls X because Y; the alternative was Z and was rejected
-  because …".
-- **Be candid about your own judgement calls.** Call out assumptions, ticket deviations, scope you added, and bugs you
-  introduced and fixed on the way. The reviewer should not discover these themselves.
-- **Verified vs reasoned.** For each claim of correctness say which command/test proves it, or that it is only reasoning
-  and what would prove it (e.g. "needs Postgres").
-- **Match the user's language** for prose (Thai if they write Thai); keep identifiers, paths and code in English.
+- **Read from git and the current files, never memory.** `git diff --stat`, then the hunks of the `Compare:` range
+  (`--cached`, plain, or `HEAD` for uncommitted; read untracked files directly). Take `file:line` from the current text.
+- **Scope is the change set only.** Leave out merge commits, upstream code, the user's local edits and generated files;
+  say what you left out.
+- **Every step carries its why**, and the rejected alternative when there was one.
+- **Be candid:** assumptions, ticket deviations, added scope, bugs you made and fixed.
+- **Verified vs reasoned:** name the command or test that proves a claim, or say it is reasoning and what would prove it.
+- **Match the user's language** for prose; identifiers, paths and code stay English.
+- No praise, no hedging on what you verified, short notes (a paragraph is two notes). Re-reading is your last
+  self-review: flag or fix what looks wrong. Publish nowhere unless asked.
 
 ## Modes
 
-Pick the mode from the request; if it names none, use **quick** and offer deep in one plain line at the end.
+No mode named: **quick**, then offer deep in one plain line on the group most worth it.
 
-| Mode | Answers | In the VAO message |
-| --- | --- | --- |
-| **quick** | "What does each part of this diff do?" | One note per hunk, grouped under a `###` step per area, in the order a reviewer should read them. |
-| **deep** | "How does this group of code work, line by line, and is it right?" | Steps follow the flow; line-by-line notes for the groups the reviewer picks; findings pinned to their lines. |
-
-Both modes share the Rules and the output above. Fix the change set first in either:
-`git status --short`, then the diff of the range in the `Compare:` line; separate feature changes from merge commits, the user's local edits and generated files.
-
-### Quick mode
-
-1. Fix the change set, then read the diff hunk by hunk from the current files, not from memory.
-2. For each hunk one note: ``- `file:line-range` — what it does``, plus a short why only when the intent is not obvious
-   from the code. Group the notes under `###` steps by area.
-3. Mark what deserves a human eye (risky logic, a deviation from the ticket, anything unproven) with `**Risk:**` or
-   `**Question:**` in the note itself, not a paragraph.
-4. The scope line says how many files and hunks and what was excluded. End with one plain line offering deep mode on the
-   group most worth it.
-
-No flow map, no ledger. Keep it short; a hunk that needs more than a line is a candidate for deep mode.
-
-### Deep mode
-
-**Read [`references/deep-mode.md`](references/deep-mode.md) before writing a deep walkthrough**: the flow map, chapters
-in execution order, the line-by-line pass for the groups the reviewer picks, decisions and the verification ledger as
-`**OK:**`/`**Risk:**` notes, and the seven-step workflow (change set → entry points → map → steps → data and contract
-changes → review order → offer to go deeper).
-
-## Style
-
-- No restating the diff line by line, except in the line-by-line pass of deep mode, where it is the point; no praise; no
-  hedging about things you verified.
-- Short notes. A note that needs a paragraph is two notes, or a step.
-- If something looks wrong while re-reading, say so and fix or flag it: the walkthrough is also a last self-review.
-- Do not publish the walkthrough anywhere unless the user asks; it is for the person who asked for it.
+- **Quick:** follow the diff. One note per hunk (what it does, why only when not obvious), grouped under `###` steps by
+  area; risky or unproven hunks get `**Risk:**` / `**Question:**`. Scope line counts files and hunks. No flow map.
+- **Deep** (ละเอียด, ไล่ทีละบรรทัด, or the user takes the offer): **read
+  [`references/deep-mode.md`](references/deep-mode.md) first.**
