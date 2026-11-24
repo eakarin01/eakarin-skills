@@ -62,6 +62,12 @@ remote. Do not check a branch out unless asked.
    change), `**Question:**` (needs the author's answer), `**Risk:**` (works but fragile or unproven), `**OK:**` (a
    decision worth confirming). Say how you know: read the code, ran a test, or reasoned. A finding that continues on
    its own line is indented by two spaces, so it stays part of the same note.
+   - **The label is the first word after the dash.** The page files a note under its label's tab and puts the icon by
+     it. A label after a description (``— cron runs at 08:00. **Risk:** …``) or on the indented line below it is filed
+     as a plain note. When a line needs both a description and a finding, put the finding first, or write two notes
+     on the same path.
+   - **Every finding has a label.** "Low risk", "suggest …" or "has a trailing space" written as plain text is a finding
+     without one: it is filed as a plain note and the reviewer misses it. Pick the label that fits.
 6. **Everything else** (the flow map, the suggested review order, the offer to go deeper) is a plain sentence or a
    bullet that does not start with a code-span path (that would be read as a note). The page does not show such lines
    yet, so anything the reader must see on the page belongs in a note.
@@ -81,7 +87,7 @@ The page shows the **last message of your turn** and replaces anything shown bef
 
 - [ ] `## Walkthrough` is there and the ``Compare:`` line is the first line under it, with refs that resolve.
 - [ ] No table anywhere in the message.
-- [ ] Every note starts with ``- `path`` or ``- `path:line` — `` (a finding's label comes after the dash, never before the path), and the paths and lines come from the current files.
+- [ ] Every note starts with ``- `path`` or ``- `path:line` — `` (a finding's label is the first word after the dash, never before the path or after a description; every finding has one), and the paths and lines come from the current files.
 - [ ] Under 16,000 characters; this is the last message of the turn (no tool call after it).
 - [ ] The scope matches the request (a PR is not reviewed as a working tree, or the other way round).
 - [ ] You are in the repository the change belongs to (the page asks for the diff in the folder where this session
